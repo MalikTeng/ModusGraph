@@ -77,4 +77,4 @@ Running the whole training process is straightforward, just use commandline tool
 
 See details of adjustable parameters in the script.
 
-Running the dynamic meshing process is ... (under construction)
+Running the dynamic meshing process is ... (under construction) 

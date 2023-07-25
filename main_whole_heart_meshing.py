@@ -15,8 +15,6 @@ import warnings
 warnings.filterwarnings('ignore')
 
 
-# TODO: add weight&bias integration to watch the back propagation in the graph
-
 torch.multiprocessing.set_sharing_strategy('file_system')
 
 def config():
