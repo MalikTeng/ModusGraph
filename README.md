@@ -2,7 +2,7 @@
 This repository includes scripts and tools running code for paper, ModusGraph: Automated 3D and 4D Mesh Model Reconstruction from cine CMR with Improved Accuracy and Efficiency [URL]. Sole purpose of this repository is to provide a reference for the paper. The code is not optimized for efficiency and not guaranteed to be bug-free. The code is written in Python 3.9.16 and Pytorch 1.12.1.
 
 # Installation
-The code is tested on Ubuntu 20.04.2 LTS. To install the code, first clone the repository:
+The code is tested on Ubuntu 18.04.6 LTS. To install the code, first clone the repository:
 
     $ git clone https://github.com/MalikTeng/ModusGraph
     
