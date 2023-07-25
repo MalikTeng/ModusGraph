@@ -44,7 +44,7 @@ template
 Data preprocessing is a must so that images, segmentations, and template meshes are in the same space. While ways to conduct such a preprocessing are not included in this script, the result can be varified by the script 'data_test_XXXX.py'. 
 
 ## Training
-###Whole heart meshing (i.e. SCOT-HEART)
+### Whole heart meshing (i.e. SCOT-HEART)
 The training process contains two stages:
 1. Pre-training: train the Voxel Processing Module, including CT modality handel and ResNet decoder.
 2. Training: train the R-StGCN module.
@@ -52,7 +52,7 @@ Detail structure of ModusGraph can be found in the paper.
 
 Parameters of the network is customizable but not recommended.
 
-###Dynamic meshing (i.e. CAP)
+### Dynamic meshing (i.e. CAP)
 under construction
 
 ## TL;DR
