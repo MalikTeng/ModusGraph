@@ -1,6 +1,8 @@
 # Introduction
 This repository includes scripts and tools running code for paper, ModusGraph: Automated 3D and 4D Mesh Model Reconstruction from cine CMR with Improved Accuracy and Efficiency [URL]. Sole purpose of this repository is to provide a reference for the paper. The code is not optimized for efficiency and not guaranteed to be bug-free. The code is written in Python 3.9.16 and Pytorch 1.12.1.
 
+![Alt text](figure/Fig-1.png)
+
 # Installation
 The code is tested on Ubuntu 18.04.6 LTS. To install the code, first clone the repository:
 
@@ -44,7 +46,7 @@ template
 Data preprocessing is a must so that images, segmentations, and template meshes are in the same space. While ways to conduct such a preprocessing are not included in this script, the result can be varified by the script 'data_test_XXXX.py'. 
 
 ## Training
-### Whole heart meshing (i.e. SCOT-HEART)
+### Whole heart meshing (i.e., SCOT-HEART)
 The training process contains two stages:
 1. Pre-training: train the Voxel Processing Module, including CT modality handel and ResNet decoder.
 2. Training: train the R-StGCN module.
@@ -52,7 +54,10 @@ Detail structure of ModusGraph can be found in the paper.
 
 Parameters of the network is customizable but not recommended.
 
-### Dynamic meshing (i.e. CAP)
+We recommand using Weights and Bias for monitoring the training process. Following snapshot shows the training process of the two training stages.
+![Alt Text](figure/wandb_screenshot.png)
+
+### Dynamic meshing (i.e., CAP)
 under construction
 
 ## TL;DR
