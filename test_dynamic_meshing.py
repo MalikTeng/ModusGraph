@@ -115,7 +115,7 @@ if __name__ == '__main__':
     )
     # directory setting
     source_root_dir = "/mnt/data/Experiment/nnUNet/nnUNet_raw/nnUNet_raw_data/Task507_CAP_ModusGraph/"
-
+ 
     patient_list = [i.strip(".nii.gz") for i in os.listdir(f"{source_root_dir}/labelsTs")][:1]
     for patient_id in tqdm(patient_list):
         image_dir = f"{source_root_dir}/imagesTs/{patient_id}_{0:04d}.nii.gz"

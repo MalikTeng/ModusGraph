@@ -7,7 +7,7 @@ import plotly.io as pio
 
 from data.transform import *
 
-
+ 
 class Args:
     def __init__(self):
         self.keys = ("ct_image", "ct_label")

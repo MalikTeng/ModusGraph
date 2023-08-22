@@ -618,7 +618,7 @@ class RStGCN(nn.Module):
                 v_batch_ = rearrange(v_batch_, '() f l p -> (l p) f')
                 v_batch_ = cgcn(v_batch_, mesh_batch.edges_packed().T)
                 v_batch_ = rearrange(v_batch_, "(l p) f -> l p f", l=seg_batch.shape[0])
-
+ 
         # Deform meshes
         v_batch_ = self.graph_fc(v_batch_)
         v_batch_ = rearrange(v_batch_, "b p f -> (b p) f")

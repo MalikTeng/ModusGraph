@@ -34,7 +34,7 @@ from monai.transforms import (
     Invertd,
 )
 from monai.data import decollate_batch
-
+ 
 from einops.einops import rearrange
 
 from scipy.ndimage import center_of_mass

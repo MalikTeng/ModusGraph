@@ -162,7 +162,7 @@ class TrainPipeline:
                 num_workers=self.num_workers,
                 )
             return train_ds, val_ds
-
+ 
     def _prepare_models(self, ):
         self.voxel_module = VoxelProcessingModule(
             ModalityHandle(

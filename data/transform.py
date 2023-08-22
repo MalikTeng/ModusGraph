@@ -86,7 +86,7 @@ def pre_transform(
             transforms.append(SelectFramesd(keys[1]))
         else:
             raise ValueError(f"the function to process labels from {dataset} is not defined for {one_or_multi} task.")
-
+ 
     # process images and labels
     transforms.extend(
         [
