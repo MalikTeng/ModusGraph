@@ -46,7 +46,7 @@ def config():
     parser.add_argument("--out_dir", type=str, 
                         default="/mnt/data/Experiment/ModusGraph/outs", 
                         help="the path to your output directory, for saving checkpoints and outputs")
-    
+     
     # path to the pretrained Voxel Processing Module
     parser.add_argument("--pre_trained_ct_module_dir", type=str, default=None, help="the path to the pretrained Voxel Processing Module")
     parser.add_argument("--pre_trained_mr_module_dir", type=str, default=None, help="the path to the pretrained Voxel Processing Module")

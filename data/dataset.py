@@ -82,7 +82,7 @@ def collate_batched_meshes(batch: list) -> dict:
                 collated_dict[k] = collated_dict[k].permute(1, 0, 2, 3, 4)
     
     return collated_dict
-
+ 
 
 def load_multimodal_datalist(
         image_paths: list,

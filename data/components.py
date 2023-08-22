@@ -432,7 +432,7 @@ class GenerateMeshesd(MapTransform):
         # )
 
         # return mesh_dict
-
+ 
     def _load_template_solo_mesh(self, voxels):
         """
             load the template myocardium mesh generated from Biobank data
