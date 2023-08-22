@@ -23,7 +23,7 @@ def config():
     """
     parser = argparse.ArgumentParser()
     # mode parameters
-    parser.add_argument("--mode", type=str, default="test", help="the mode of the script, can be 'train' or 'test'")
+    parser.add_argument("--mode", type=str, default="train", help="the mode of the script, can be 'train' or 'test'")
     # data parameters
     parser.add_argument("--ct_image_dir", type=str, 
                         default="/mnt/data/Experiment/nnUNet/nnUNet_raw/nnUNet_raw_data/Task504_SCOTHEART/imagesTr", 
@@ -55,9 +55,9 @@ def config():
     parser.add_argument("--num_classes", type=int, default=2, help="the number of segmentation classes of foreground plus background")
     # parser.add_argument("--batch_size", type=int, default=1, help="the batch size for training")
     parser.add_argument("--cache_rate", type=float, default=1.0, help="the cache rate for training, see MONAI document for more details")
-    parser.add_argument("--max_epochs", type=int, default=30, help="the maximum number of epochs for training")
-    parser.add_argument("--delay_epochs", type=int, default=15, help="the number of epochs for pre-training")
-    parser.add_argument("--val_interval", type=int, default=5, help="the interval of validation")
+    parser.add_argument("--max_epochs", type=int, default=300, help="the maximum number of epochs for training")
+    parser.add_argument("--delay_epochs", type=int, default=150, help="the number of epochs for pre-training")
+    parser.add_argument("--val_interval", type=int, default=25, help="the interval of validation")
 
     parser.add_argument("--lr", type=float, default=1e-3, help="the learning rate for training")
     parser.add_argument("--crop_window_size", type=int, nargs='+', default=[128, 128, 128], help="the size of the crop window for training")
@@ -93,8 +93,8 @@ def pairing_check(image_paths, label_paths):
 
 def train(**kwargs):
     # load CT images and labels (here used 400 cases from SCOTHEART)
-    ct_image_paths = sorted(glob(f"{super_params.ct_image_dir}/*.nii.gz"))[:100]
-    ct_label_paths = sorted(glob(f"{super_params.ct_label_dir}/*.nii.gz"))[:100]
+    ct_image_paths = sorted(glob(f"{super_params.ct_image_dir}/*.nii.gz"))[:400]
+    ct_label_paths = sorted(glob(f"{super_params.ct_label_dir}/*.nii.gz"))[:400]
     # check if images and labels are paired
     pairing_check(ct_image_paths, ct_label_paths)
 

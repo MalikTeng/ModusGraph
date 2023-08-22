@@ -328,14 +328,12 @@ class TrainPipeline:
         self.graph_module.eval()
 
         seg_metric_batch_decoder = DiceMetric(
-            include_background=False,
+            include_background=True,
             reduction="mean_batch", 
-            num_classes=self.super_params.num_classes
             )
         msh_metric_batch_decoder = DiceMetric(
-            include_background=False,
+            include_background=True,
             reduction="mean_batch", 
-            num_classes=self.super_params.num_classes
             )
 
         cached_data = dict()
@@ -344,11 +342,10 @@ class TrainPipeline:
             for step, val_data in enumerate(self.val_loader):
                 images_batch, labels_batch = (
                     val_data["mr_image"].as_tensor().to(DEVICE),
-                    val_data["mr_label"].as_tensor(),
+                    val_data["mr_label"].as_tensor().to(DEVICE),
                     )
-                # convert multi-classes labels to binary classes, and to one-hot encoding
+                # convert multi-classes labels to binary classes
                 labels_batch = torch.logical_or(labels_batch == 2, labels_batch == 4)
-                labels_batch = F.one_hot(labels_batch.to(torch.int64).squeeze(1), num_classes=self.super_params.num_classes).permute(0, 4, 1, 2, 3).to(DEVICE)
                 template_meshes = val_data["mr_template_meshes"]["meshes"].to(DEVICE)
 
                 preds_seg, _ = self.voxel_module(images_batch)
@@ -367,7 +364,6 @@ class TrainPipeline:
                     )
                     pred_voxels_batch.append(pred_voxels)
                 pred_voxels_batch = torch.cat(pred_voxels_batch, dim=0)
-                pred_voxels_batch = self.post_transform(pred_voxels_batch.squeeze(0))
                 # TODO: evaluate the error between seudo mesh and predicted mesh
                 msh_metric_batch_decoder(pred_voxels_batch, labels_batch)
 
