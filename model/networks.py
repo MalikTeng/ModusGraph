@@ -1,9 +1,9 @@
-import os
-from skimage.measure import subdivide_polygon
-
-from torch_geometric.typing import Dict
+import os, sys
+# if debugging this script, change working dircetory to the root of the project
 os.chdir(os.getcwd())
-
+sys.path.append(os.getcwd())
+from skimage.measure import subdivide_polygon
+from torch_geometric.typing import Dict
 from typing import Any, Callable, List, Optional, Sequence, Tuple, Union
 import math
 import numpy as np
@@ -20,260 +20,13 @@ from torch_geometric_temporal.nn.recurrent import GConvGRU, DyGrEncoder
 from pytorch3d.structures import Meshes
 from einops.einops import rearrange, repeat
 from einops.layers.torch import Rearrange
-import FastGeodis
+# import FastGeodis
 
 from model.parts import *
 
 
 __all__ = ["VoxelProcessingModule", "ModalityHandle", "RStGCN"]
 
-# class NetGel(nn.Module):
-#     def __init__(self, encoder, decoder):
-#         super().__init__()
-#         self.encoder = encoder
-#         self.decoder = decoder
-
-#     def forward(self, x):
-#         down_x = self.encoder(x)
-#         x_ = self.decoder(down_x)
-#         return x_
-
-
-# class CTEncoder(nn.Module):
-#     def __init__(
-#             self,
-#             input_image_size: Sequence[int],
-#             vae_nz: int = 1024,
-#             spatial_dims: int = 3,
-#             init_filters: int = 8,
-#             in_channels: int = 1,
-#             dropout_prob: Optional[float] = None,
-#             act: Union[Tuple, str] = ("RELU", {"inplace": True}),
-#             norm: Union[Tuple, str] = ("GROUP", {"num_groups": 8}),
-#             blocks_down: tuple = (1, 2, 2, 4),
-#     ):
-#         super(CTEncoder, self).__init__()
-
-#         self.spatial_dims = spatial_dims
-#         self.init_filters = init_filters
-#         self.input_image_size = input_image_size
-#         self.blocks_down = blocks_down
-#         self.act = get_act_layer(act)
-#         self.norm = norm
-
-#         self.encoder = ResNetEncoder(
-#             spatial_dims=spatial_dims,
-#             init_filters=init_filters,
-#             in_channels=in_channels,
-#             dropout_prob=dropout_prob,
-#             act=act,
-#             norm=norm,
-#             blocks_down=blocks_down,
-#         )
-#         self.smallest_filters = 16
-#         zoom = 2 ** (len(self.blocks_down) - 1)
-#         self.fc_insize = [s // (2 * zoom) for s in self.input_image_size]
-#         self.vae_nz = vae_nz
-#         self._prepare_vae_modules()
-
-#     def _prepare_vae_modules(self):
-#         zoom = 2 ** (len(self.blocks_down) - 1)
-#         v_filters = self.init_filters * zoom
-#         total_elements = int(self.smallest_filters * np.prod(self.fc_insize))
-
-#         self.vae_down = nn.Sequential(
-#             get_norm_layer(name=self.norm, spatial_dims=self.spatial_dims, channels=v_filters),
-#             self.act,
-#             get_conv_layer(self.spatial_dims, v_filters, self.smallest_filters, stride=2, bias=True),
-#             get_norm_layer(name=self.norm, spatial_dims=self.spatial_dims, channels=self.smallest_filters),
-#             self.act,
-#         )
-#         self.vae_fc1 = nn.Linear(total_elements, self.vae_nz)
-#         self.vae_fc2 = nn.Linear(total_elements, self.vae_nz)
-
-#     def _get_vae_loss(self, vae_input: torch.Tensor):
-#         """
-#         Args:
-#             vae_input: the input of VAE module, which is also the output of the network's encoder.
-#         """
-#         x_vae = self.vae_down(vae_input)
-#         x_vae = x_vae.view(-1, self.vae_fc1.in_features)
-#         z_mean = self.vae_fc1(x_vae)
-
-#         z_mean_rand = torch.randn_like(z_mean)
-#         z_mean_rand.requires_grad_(False)
-
-#         z_sigma = self.vae_fc2(x_vae)
-#         z_sigma = F.softplus(z_sigma)
-#         vae_reg_loss = 0.5 * torch.mean(z_mean ** 2 + z_sigma ** 2 - torch.log(1e-8 + z_sigma ** 2) - 1)
-
-#         return vae_reg_loss
-
-#     def forward(self, x):
-#         down_x = self.encoder(x)
-#         if self.training:
-#             vae_loss = self._get_vae_loss(down_x[0])
-#             return down_x, vae_loss
-#         else:
-#             return down_x
-
-
-# class MREncoder(nn.Module):
-#     def __init__(
-#             self,
-#             input_image_size: Sequence[int],
-#             vae_nz: int = 1024,
-#             spatial_dims: int = 3,
-#             init_filters: int = 8,
-#             in_channels: int = 1,
-#             dropout_prob: Optional[float] = None,
-#             act: Union[Tuple, str] = ("RELU", {"inplace": True}),
-#             norm: Union[Tuple, str] = ("GROUP", {"num_groups": 8}),
-#             blocks_down: tuple = (1, 2, 2, 4),
-#             temperature: float = 0.07,
-#     ):
-#         super(MREncoder, self).__init__()
-
-#         self.spatial_dims = spatial_dims
-#         self.init_filters = init_filters
-#         self.input_image_size = input_image_size
-#         self.blocks_down = blocks_down
-#         self.act = get_act_layer(act)
-#         self.norm = norm
-
-#         self.encoder = ResNetEncoder(
-#             spatial_dims=spatial_dims,
-#             init_filters=init_filters,
-#             in_channels=in_channels,
-#             dropout_prob=dropout_prob,
-#             act=act,
-#             norm=norm,
-#             blocks_down=blocks_down,
-#         )
-#         self.smallest_filters = 16
-#         zoom = 2 ** (len(self.blocks_down) - 1)
-#         self.fc_insize = [s // (2 * zoom) for s in self.input_image_size]
-#         self.vae_nz = vae_nz
-#         self._prepare_vae_modules()
-
-#         # self.contrastive_loss = losses.NTXentLoss(temperature)
-
-#     def _prepare_vae_modules(self):
-#         zoom = 2 ** (len(self.blocks_down) - 1)
-#         v_filters = self.init_filters * zoom
-#         total_elements = int(self.smallest_filters * np.prod(self.fc_insize))
-
-#         self.vae_down = nn.Sequential(
-#             get_norm_layer(name=self.norm, spatial_dims=self.spatial_dims, channels=v_filters),
-#             self.act,
-#             get_conv_layer(self.spatial_dims, v_filters, self.smallest_filters, stride=2, bias=True),
-#             get_norm_layer(name=self.norm, spatial_dims=self.spatial_dims, channels=self.smallest_filters),
-#             self.act,
-#         )
-#         self.vae_fc1 = nn.Linear(total_elements, self.vae_nz)
-#         self.vae_fc2 = nn.Linear(total_elements, self.vae_nz)
-
-#     def _get_vae_loss(self, vae_input: torch.Tensor):
-#         """
-#         Args:
-#             vae_input: the input of VAE module, which is also the output of the network's encoder.
-#         """
-#         x_vae = self.vae_down(vae_input)
-#         x_vae = x_vae.view(-1, self.vae_fc1.in_features)
-#         z_mean = self.vae_fc1(x_vae)
-
-#         z_mean_rand = torch.randn_like(z_mean)
-#         z_mean_rand.requires_grad_(False)
-
-#         z_sigma = self.vae_fc2(x_vae)
-#         z_sigma = F.softplus(z_sigma)
-#         vae_reg_loss = 0.5 * torch.mean(z_mean ** 2 + z_sigma ** 2 - torch.log(1e-8 + z_sigma ** 2) - 1)
-
-#         return vae_reg_loss
-
-#     def _hierarchical_contrastive_loss(self, outs_mr, outs_ct):
-#         contrastive_loss = 0
-#         for i in range(len(self.blocks_down)):
-#             emb_m = rearrange(outs_mr[i], "b c h w d -> b (c h w d)")
-#             emb_n = rearrange(outs_ct[i], "b c h w d -> b (c h w d)")
-#             emb = torch.cat([emb_m, emb_n], dim=0)
-#             gt = torch.arange(outs_ct[i].shape[0]).repeat(2)
-#             contrastive_loss = contrastive_loss + self.contrastive_loss(emb, gt)
-
-#         return contrastive_loss
-
-#     def forward(self, x_mr, down_x_ct=None):
-#         down_x_mr = self.encoder(x_mr)
-#         if self.training:
-#             if down_x_ct is None:
-#                 raise AssertionError(
-#                     "Latent representations (down_x_ct) must be passed in during training!"
-#                 )
-#             contrastive_loss = self._hierarchical_contrastive_loss(down_x_mr, down_x_ct)
-#             vae_loss = self._get_vae_loss(down_x_mr[0])
-#             loss = contrastive_loss + vae_loss
-#             return down_x_mr, loss
-#         else:
-#             return down_x_mr
-
-
-# class SharedDecoder(nn.Module):
-#     def __init__(
-#             self,
-#             spatial_dims: int = 3,
-#             init_filters: int = 8,
-#             out_channels: int = 4,
-#             act: Union[Tuple, str] = ("RELU", {"inplace": True}),
-#             norm: Union[Tuple, str] = ("GROUP", {"num_groups": 8}),
-#             use_conv_final: bool = True,
-#             blocks_up: tuple = (1, 1, 1),
-#             upsample_mode: Union[UpsampleMode, str] = UpsampleMode.NONTRAINABLE,
-#     ):
-#         super(SharedDecoder, self).__init__()
-
-#         self.decoder = ResNetDecoder(
-#             spatial_dims=spatial_dims,
-#             init_filters=init_filters,
-#             out_channels=out_channels,
-#             act=act,
-#             norm=norm,
-#             use_conv_final=use_conv_final,
-#             blocks_up=blocks_up,
-#             upsample_mode=upsample_mode,
-#         )
-
-#     def forward(self, down_x):
-#         x_ = self.decoder(down_x)
-#         return x_
-
-
-# class VanillaUNet(nn.Module):
-#     def __init__(
-#             self,
-#             init_filters: int = 8,
-#             in_channels: int = 1,
-#             out_channels: int = 1,
-#             use_conv_final: bool = True,
-#             act: str = 'relu',
-#             norm: str = 'instance',
-#             num_blocks_down: int = 3,
-#             num_blocks_up: int = 3,
-#     ):
-#         super(VanillaUNet, self).__init__()
-#         self.encoder = VanillaEncoder(
-#             init_filters, in_channels, act, norm, num_blocks_down
-#         )
-#         self.decoder = VanillaDecoder(
-#             init_filters, out_channels, act, norm, use_conv_final, num_blocks_up
-#         )
-
-#     def forward(self, x):
-#         x, down_x = self.encoder(x)
-#         down_x.reverse()
-
-#         x = self.decoder(x, down_x)
-
-#         return x
 
 class VoxelProcessingModule(nn.Module):
     def __init__(
@@ -741,15 +494,16 @@ class RStGCN(nn.Module):
         hidden_features: int,
         num_blocks: int,
         sdm_out_channel: int,
-        template_mesh: dict,
+        template_mesh_dict: dict,
         stride: int = 1,
         residual: bool = True,
         adaptive: bool = True,
         attention: bool = True,
+        task_code: str = "whole_heart_meshing"
         ):
         super(RStGCN, self).__init__()
-        
-        template_mesh, faces_labels = template_mesh["meshes"], template_mesh["faces_labels"]
+        self.task_code = task_code
+        template_mesh, faces_labels = template_mesh_dict["meshes"], template_mesh_dict["faces_labels"]
         self.graph = GraphAAGCN(
             template_mesh.edges_packed().T, template_mesh._V
         )
@@ -825,12 +579,13 @@ class RStGCN(nn.Module):
             )
 
     def _sdm_sample(self, v_pos, x_batch):
-        x_batch = x_batch[:, 1:].float() # remove background
-        for b in range(x_batch.shape[0]):
-            x_batch[b] = FastGeodis.signed_generalised_geodesic3d(
-                x_batch[b].unsqueeze(0), x_batch[b].unsqueeze(0),
-                spacing=[1, 1, 1], v=1, lamb=1.0, iter=4
-                )
+        # x_batch = x_batch[:, 1:].float() # remove background
+        # for b in range(x_batch.shape[0]):
+        #     x_batch[b] = FastGeodis.signed_generalised_geodesic3d(
+        #         x_batch[b].unsqueeze(0), x_batch[b].unsqueeze(0),
+        #         spacing=[1, 1, 1], v=1, lamb=1.0, iter=4
+        #         )
+        x_batch = x_batch[:, 1:] # remove background
 
         v_grid = rearrange(v_pos, "b v p -> b v () () p")
         x_batch = F.grid_sample(
@@ -851,13 +606,18 @@ class RStGCN(nn.Module):
 
         # R-StGCN
         for agcn, cgcn in zip(self.agcn_stack, self.cgcn_stack):
-            # v_batch_ = rearrange(v_batch_, 'l p f -> () f l p')
-            v_batch_ = rearrange(v_batch_, "b p f -> b f () p")
-            v_batch_ = agcn(v_batch_)
-            # v_batch_ = rearrange(v_batch_, '() f l p -> l p f')
-            v_batch_ = rearrange(v_batch_, "b f () p -> (b p) f")
-            v_batch_ = cgcn(v_batch_, mesh_batch.edges_packed().T)
-            v_batch_ = rearrange(v_batch_, "(b p) f -> b p f", b=seg_batch.shape[0])
+            if self.task_code.lower().strip(' ') == "whole_heart_meshing":
+                v_batch_ = rearrange(v_batch_, "b p f -> b f () p")
+                v_batch_ = agcn(v_batch_)
+                v_batch_ = rearrange(v_batch_, "b f () p -> (b p) f")
+                v_batch_ = cgcn(v_batch_, mesh_batch.edges_packed().T)
+                v_batch_ = rearrange(v_batch_, "(b p) f -> b p f", b=seg_batch.shape[0])
+            else:
+                v_batch_ = rearrange(v_batch_, 'l p f -> () f l p')
+                v_batch_ = agcn(v_batch_)
+                v_batch_ = rearrange(v_batch_, '() f l p -> (l p) f')
+                v_batch_ = cgcn(v_batch_, mesh_batch.edges_packed().T)
+                v_batch_ = rearrange(v_batch_, "(l p) f -> l p f", l=seg_batch.shape[0])
 
         # Deform meshes
         v_batch_ = self.graph_fc(v_batch_)
@@ -884,9 +644,9 @@ class Args:
         self.dataset = "scotheart"
         self.crop_window_size = [128, 128, 128]
         self.section = "test"
-        self.point_limit = 53_500
-        self.one_or_multi = "multi"
-        self.template_dir = "/home/yd21/Documents/ModusGraph/template/scotheart/"
+        self.point_limit = 5_806
+        self.one_or_multi = "solo"
+        self.template_dir = "/home/yd21/Documents/ModusGraph/template/cap/"
 
 if __name__ == "__main__":
     from data.transform import pre_transform
@@ -901,7 +661,7 @@ if __name__ == "__main__":
         ModalityHandle(
             init_filters=8,
             in_channels=1,
-            out_channels=7, # 6 classes + 1 background
+            out_channels=2, # myocardium and background
             num_init_blocks=(1, 2, 2, 4),
             ),
         num_up_blocks=(1, 1, 1),
@@ -912,8 +672,8 @@ if __name__ == "__main__":
     # print structure of ResNet decoder
     print(voxel_module.resnet_decoder)
     
-    source_root_dir = "/mnt/DATA/Experiment/nnUNet/nnUNet_raw_data_base/nnUNet_raw_data/Task504_SCOTHEART/"
-    patient_list = [i.strip(".nii.gz") for i in os.listdir(os.path.join(source_root_dir, "labelsTr"))][:1]
+    source_root_dir = "/mnt/data/Experiment/nnUNet/nnUNet_raw/nnUNet_raw_data/Task504_SCOTHEART/"
+    patient_list = [i.strip(".nii.gz") for i in os.listdir(f"{source_root_dir}/labelsTr")][:1]
     for patient_id in patient_list:
         image_dir = os.path.join(
             source_root_dir, "imagesTr", f"{patient_id}_0000.nii.gz"
@@ -925,23 +685,17 @@ if __name__ == "__main__":
             "ct_image": image_dir,
             "ct_label": label_dir
         })
-        image = output_data["ct_image"].as_tensor().unsqueeze(0).to("cuda")
-        output_data["ct_template_meshes"]["meshes"] = Meshes(
-            verts=[output_data["ct_template_meshes"]["meshes"].verts_packed()],
-            faces=[output_data["ct_template_meshes"]["meshes"].faces_packed()]
-        )
-        template_mesh = output_data["ct_template_meshes"]["meshes"]
-        faces_labels = output_data["ct_template_meshes"]["faces_labels"].unsqueeze(0).to("cuda")
-        label_point_clouds = Pointclouds(
-            points=[output_data["ct_label_point_clouds"]["point_clouds"].points_packed()],
-            normals=[output_data["ct_label_point_clouds"]["point_clouds"].normals_packed()],
-        ).to("cuda")
+        image = output_data["ct_image"].as_tensor().unsqueeze(1).to("cuda")
+        template_mesh = output_data["ct_template_meshes"]["meshes"].to("cuda")
 
+        output_data["ct_template_meshes"]["meshes"] = output_data["ct_template_meshes"]["meshes"][0]
+        output_data["ct_template_meshes"]["faces_labels"] = output_data["ct_template_meshes"]["faces_labels"][:, :1]
         graph_module = RStGCN(
             hidden_features=32, num_blocks=3,
-            sdm_out_channel=6,  # the number of classes (out_channel) excludeing background
-            template_mesh=output_data["ct_template_meshes"],
-            attention=False
+            sdm_out_channel=1,  # the number of classes (out_channel) excludeing background
+            template_mesh_dict=output_data["ct_template_meshes"],
+            attention=False,
+            task_code="dynamic_meshing"
         ).to("cuda")
         # print structure of graph module
         print(graph_module)
@@ -949,5 +703,7 @@ if __name__ == "__main__":
         pred_seg, pred_seg_downsample = voxel_module(image)
         print(f"Voxel Module Output Shape:\t{pred_seg.shape} | {pred_seg_downsample.shape}")
         template_mesh = template_mesh.to("cuda")
-        pred_meshes_batch, new_faces_labels = graph_module(template_mesh, pred_seg, subdivision=True)
-        print(f"Graph Module Output Shape:\t{pred_meshes_batch.verts_padded().shape} | {new_faces_labels.shape}")
+        pred_meshes_batch = graph_module(template_mesh, pred_seg, subdivision=False)
+        print(f"Graph Module Output Shape:\t{pred_meshes_batch.verts_padded().shape} | {pred_meshes_batch.faces_padded().shape}")
+        # pred_meshes_batch, new_faces_labels = graph_module(template_mesh, pred_seg, subdivision=False)
+        # print(f"Graph Module Output Shape:\t{pred_meshes_batch.verts_padded().shape} | {new_faces_labels.shape}")

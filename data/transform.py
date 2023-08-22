@@ -70,39 +70,27 @@ def pre_transform(
     ]
 
     # label indices correction
-    if dataset.lower() == "scotheart":
-        transforms.append(ConvertToMultiChannelBasedOnSCOTHEARTClassesd(keys[1]))
-        label_indices = None
-    elif dataset.lower() == "mmwhs":
-        transforms.append(ConvertToMultiChannelBasedOnMMWHSClassesd(keys[1]))
-        label_indices = np.arange(1, 8)
-    elif dataset.lower() == "acdc":
-        transforms.append(ConvertToMultiChannelBasedOnACDCClassesd(keys[1]))
-        label_indices = np.arange(1, 4)
+    if one_or_multi == "multi":
+        # static CT images and multi-classes labels shall be processed for the whole heart meshing task, and only data from SCOT-HEART is available
+        if dataset.lower() == "scotheart":
+            transforms.append(ConvertToMultiChannelBasedOnSCOTHEARTClassesd(keys[1]))
+        else:
+            raise ValueError(f"the function to process labels from {dataset} is not defined for {one_or_multi} task.")
     else:
-        raise ValueError(f"the function to process labels from {dataset} is not defined.")
-
-    # foreground processing
-    if dataset.lower() == "mmwhs":
-        transforms.append(
-            Spacingd(
-                keys,
-                pixdim=(1.0, 1.0, 1.0),
-                mode=('bilinear', 'nearest'),
-                padding_mode='zeros'
-            )
-        )
-    elif dataset.lower() == "acdc":
-        transforms.append(
-            AddRVMyoToACDCClassesd(
-                keys[1]
-            ),
-        )
+        # both static CT images and labels and dynamic MR images and labels shall be processed for the dynamic meshing task.
+        # the first channel is number of frames, and labels are not in one-hot format
+        if dataset.lower() == "scotheart":
+            transforms.append(Flipd(keys, spatial_axis=0))
+            pass
+        elif dataset.lower() == "cap":
+            transforms.append(SelectFramesd(keys[1]))
+        else:
+            raise ValueError(f"the function to process labels from {dataset} is not defined for {one_or_multi} task.")
 
     # process images and labels
-    assert label_indices is None, "label indices should be None for use of ModusGraph"
     transforms.extend(
         [
+            # foreground cropping and down-sampling
             CropForegroundd(
                 keys,
                 source_key=keys[1],
@@ -139,7 +127,7 @@ def pre_transform(
             Spacingd(
                 f"{keys[1]}_downsample",
                 pixdim=[8.0, 8.0, 8.0],
-                mode="bilinear",
+                mode="nearest",
                 padding_mode="zeros"
             ),
             Resized(
@@ -152,12 +140,12 @@ def pre_transform(
                 spatial_size=max(crop_window_size) // 8,
                 mode="minimum",
             ),
-            MergeMultiChanneld([keys[1], f"{keys[1]}_downsample"]),
+            MergeMultiChanneld([keys[1], f"{keys[1]}_downsample"]) if dataset.lower() == "scotheart" else Identityd(),
         ]
     )
 
     # final touch with fixed transforms
-    if section == 'training':
+    if section == "training":
         # data-augmentation
         transforms.extend([
             RandScaleIntensityd(
@@ -170,32 +158,31 @@ def pre_transform(
                 keys=keys[0],
                 gamma=(2.5, 4.5)
             ),
-            # TODO: add rotation, scaling, flipping augmentation
         ])
     transforms.append(ScaleIntensityd(keys[0], minv=0, maxv=1))
 
     return Compose(transforms)
 
 
-def mask_ground_truth(batch_data, keys):
-    """
-    Source the true slice position for each label
-    :param: batch_data: a batch of MR data comprises array, meta_dict and foreground coordinates
-    :param: crop_window_size: the size of network input
+# def mask_ground_truth(batch_data, keys):
+#     """
+#     Source the true slice position for each label
+#     :param: batch_data: a batch of MR data comprises array, meta_dict and foreground coordinates
+#     :param: crop_window_size: the size of network input
 
-    :return:    mask of slices with manual labels (1 for labels and 0 for others).
-    """
-    label = batch_data[keys[1]].get_array(np.ndarray)
-    B, _, H, W, D = np.round(label.shape).astype(int)
-    start_idx = [np.min(np.nonzero(i)[-1]) for i in np.argmax(label, axis=1)]
-    dz = [
-        torch.round(batch_data[keys[1]].meta['pixdim'][i, 3]).int().item()
-        for i in range(B)
-    ]
+#     :return:    mask of slices with manual labels (1 for labels and 0 for others).
+#     """
+#     label = batch_data[keys[1]].get_array(np.ndarray)
+#     B, _, H, W, D = np.round(label.shape).astype(int)
+#     start_idx = [np.min(np.nonzero(i)[-1]) for i in np.argmax(label, axis=1)]
+#     dz = [
+#         torch.round(batch_data[keys[1]].meta["pixdim"][i, 3]).int().item()
+#         for i in range(B)
+#     ]
 
-    masks = np.zeros((B, 1, H, W, D))
-    for i in range(B):
-        masks[i, ..., np.arange(start_idx[i], D, dz[i])] = 1
-    masks = masks.astype(bool)
+#     masks = np.zeros((B, 1, H, W, D))
+#     for i in range(B):
+#         masks[i, ..., np.arange(start_idx[i], D, dz[i])] = 1
+#     masks = masks.astype(bool)
 
-    return torch.from_numpy(masks)
+#     return torch.from_numpy(masks)

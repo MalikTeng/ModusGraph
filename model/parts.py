@@ -613,7 +613,7 @@ class SubdivideMeshes(nn.Module):
             mesh = meshes[0]
             assert faces_labels is not None, "faces_labels must be provided if meshes is provided"
             faces_labels = list(
-                faces_index.nonzero().flatten() for faces_index in faces_labels.squeeze()
+                faces_index.nonzero().flatten() for faces_index in faces_labels.squeeze(0)
                 )
             with torch.no_grad():
                 subdivided_faces, self.faces_labels = self.subdivide_faces(mesh, faces_labels)

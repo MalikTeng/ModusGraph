@@ -43,25 +43,27 @@ template
 ```
 
 ## Preprocessing
-Data preprocessing is a must so that images, segmentations, and template meshes are in the same space. While ways to conduct such a preprocessing are not included in this script, the result can be varified by the script 'data_test_XXXX.py'. 
+Data preprocessing is a must so that images, segmentations, and template meshes are in the same space. While ways to conduct such a preprocessing are not included in this script, the result can be varified by the script 'test_XXXX.py'. 
 
 ## Training
+Detail structure of ModusGraph can be found in the paper.
 ### Whole heart meshing (i.e., SCOT-HEART)
 The training process contains two stages:
 1. Pre-training: train the Voxel Processing Module, including CT modality handel and ResNet decoder.
 2. Training: train the R-StGCN module.
-Detail structure of ModusGraph can be found in the paper.
+
+### Dynamic meshing (i.e., CAP)
+The training process contains two stages:
+1. Pre-training: train the Voxel Processing Module and the R-StGCN module with CT data.
+2. Training: fine-tuning the whole ModusGraph networks with cine CMR data.
 
 Parameters of the network is customizable but not recommended.
 
 We recommand using Weights and Bias for monitoring the training process. Following snapshot shows the training process of the two training stages.
 ![Alt Text](figure/wandb_screenshot.png)
 
-### Dynamic meshing (i.e., CAP)
-under construction
-
 ## TL;DR
-Running the whole training process is straightforward, just use commandline tool, e.g.:
+Running the whole training process is straightforward, just use commandline tool. See details of adjustable parameters in the script.
 
     $ python main-whole_heart_meshing.py \
 
@@ -71,7 +73,7 @@ Running the whole training process is straightforward, just use commandline tool
     --out_dir /path/to/out_dir \
 
     --max_epochs 500 \
-    --delay_epochs 0 \
+    --delay_epochs 250 \
     --val_interval 50 \
 
     --crop_window_size 128 128 128 \
@@ -80,6 +82,23 @@ Running the whole training process is straightforward, just use commandline tool
 
     --cache_rate 1.0
 
-See details of adjustable parameters in the script.
+Running the dynamic meshing process is very similar except arguments need for both CT and MR images and labels. See details in the script.
 
-Running the dynamic meshing process is ... (under construction) 
+    $ python main-dynamic_meshing.py \
+
+    --ct_image_dir /path/to/image_ct \
+    --ct_label_dir /path/to/label_ct \
+    --mr_image_dir /path/to/image_mr \
+    --mr_label_dir /path/to/label_mr \
+    --log_dir /path/to/log_dir \
+    --out_dir /path/to/out_dir \
+
+    --max_epochs 500 \
+    --delay_epochs 250 \
+    --val_interval 50 \
+    
+    --crop_window_size 128 128 128 \
+    --batch_size 24 \
+    --point_limit 53_500 \
+
+    --cache_rate 1.0

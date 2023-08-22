@@ -1,5 +1,4 @@
 import os
-import time
 from collections import OrderedDict
 import numpy as np
 from itertools import chain
@@ -7,11 +6,8 @@ import torch
 import torch.nn.functional as F
 from trimesh.voxel.ops import matrix_to_marching_cubes
 from pytorch3d.io import save_obj
-from pytorch3d.loss import (
-    chamfer_distance,
-    mesh_edge_loss,
-    mesh_normal_consistency,
-)
+from pytorch3d.structures import Pointclouds
+from pytorch3d.ops.marching_cubes import marching_cubes
 from monai.data import DataLoader
 from monai.losses import DiceCELoss
 from monai.metrics import DiceMetric
@@ -59,7 +55,7 @@ class TrainPipeline:
         self.is_training = is_training
         set_determinism(seed=self.seed)
 
-        self.log_dir = os.path.join(super_params.log_dir, "whole_heart_meshing", super_params.run_id)
+        self.log_dir = os.path.join(super_params.log_dir, "dynamic_meshing", super_params.run_id)
         if not os.path.exists(self.log_dir):
             os.makedirs(self.log_dir)
         if is_training:
@@ -67,16 +63,15 @@ class TrainPipeline:
                 {k: np.asarray([]) for k in ["total", "seg", "chamfer", "edge", "face", "laplacian"]}
             )
             self.eval_seg_score = OrderedDict(
-                {k: np.asarray([]) for k in ["lv", "lv-myo", "rv", "la", "ra", "av"]}
+                {k: np.asarray([]) for k in ["myo"]}
             )
             self.eval_msh_score = self.eval_seg_score.copy()
             self.best_eval_score = 0
         else:
-            self.out_dir = os.path.join(super_params.out_dir, "whole_heart_meshing", super_params.run_id)
+            self.out_dir = os.path.join(super_params.out_dir, "dynamic_meshing", super_params.run_id)
             if not os.path.exists(self.out_dir):
                 os.makedirs(self.out_dir)
 
-        train_trans, val_trans = self._prepare_transform()
         self.post_transform = Compose(
             [
                 AsDiscrete(argmax=True),
@@ -88,52 +83,67 @@ class TrainPipeline:
             ]
         )
 
-        train_ds, val_ds = self._prepare_dataset(train_trans, val_trans)
         if is_training:
-            self.train_loader = DataLoader(
-                train_ds, batch_size=self.super_params.batch_size,
+            ct_train_ds, _ = self._prepare_dataset(
+                *self._prepare_transform(("ct_image", "ct_label"), "scotheart"), 
+                data_bundle["ct_image_paths"], data_bundle["ct_label_paths"], 
+                ("ct_image", "ct_label")
+            )
+        mr_train_ds, mr_val_ds = self._prepare_dataset(
+            *self._prepare_transform(("mr_image", "mr_label"), "cap"), 
+            data_bundle["mr_image_paths"], data_bundle["mr_label_paths"], 
+            ("mr_image", "mr_label")
+        )
+        if is_training:
+            self.ct_train_loader = DataLoader(
+                ct_train_ds, batch_size=1,
+                shuffle=True, num_workers=self.num_workers,
+                collate_fn=collate_batched_meshes
+                )
+            self.mr_train_loader = DataLoader(
+                mr_train_ds, batch_size=1,
                 shuffle=True, num_workers=self.num_workers,
                 collate_fn=collate_batched_meshes
                 )
         self.val_loader = DataLoader(
-            val_ds, batch_size=1,
+            mr_val_ds, batch_size=1,
             shuffle=False, num_workers=self.num_workers,
             collate_fn=collate_batched_meshes
             )
 
         self._prepare_models()
 
-    def _prepare_transform(self, ):
+    def _prepare_transform(self, keys, dataset):
         if not self.is_training:
             val_transform = pre_transform(
-                self.data_bundle["keys"], self.data_bundle["dataset"], 
+                keys, dataset, 
                 self.super_params.crop_window_size, "test",
                 point_limit=self.super_params.point_limit, 
-                one_or_multi="multi",
+                one_or_multi="solo",
                 template_dir=self.super_params.template_dir
                 )
             return None, val_transform
         else:
             train_transform = pre_transform(
-                self.data_bundle["keys"], self.data_bundle["dataset"], 
+                keys, dataset, 
                 self.super_params.crop_window_size, "training",
                 point_limit=self.super_params.point_limit, 
-                one_or_multi="multi",
+                one_or_multi="solo",
                 template_dir=self.super_params.template_dir
                 )
             val_transform = pre_transform(
-                self.data_bundle["keys"], self.data_bundle["dataset"], 
+                keys, dataset, 
                 self.super_params.crop_window_size, "validation",
                 point_limit=self.super_params.point_limit, 
-                one_or_multi="multi",
+                one_or_multi="solo",
                 template_dir=self.super_params.template_dir
                 )
             return train_transform, val_transform
 
-    def _prepare_dataset(self, train_transform, val_transform):
+    def _prepare_dataset(self, train_transform, val_transform, image_paths, label_paths, keys):
         if not self.is_training:
             val_ds = MultimodalDataset(
-                self.data_bundle["image_paths"], self.data_bundle["label_paths"], self.data_bundle["keys"],
+                image_paths, label_paths, keys,
                 section="test",
                 transform=val_transform,
                 seed=self.seed,
@@ -143,10 +153,10 @@ class TrainPipeline:
             return None, val_ds
         else:
             image_paths, label_paths = shuffle(
-                self.data_bundle["image_paths"], self.data_bundle["label_paths"], random_state=self.seed
+                image_paths, label_paths, random_state=self.seed
                 )
             train_ds = MultimodalDataset(
-                image_paths, label_paths, self.data_bundle["keys"],
+                image_paths, label_paths, keys,
                 section="training",
                 transform=train_transform,
                 seed=self.seed,
@@ -154,7 +164,7 @@ class TrainPipeline:
                 num_workers=self.num_workers,
                 )
             val_ds = MultimodalDataset(
-                image_paths, label_paths, self.data_bundle["keys"],
+                image_paths, label_paths, keys,
                 section="validation",
                 transform=val_transform,
                 seed=self.seed,
@@ -164,32 +174,37 @@ class TrainPipeline:
             return train_ds, val_ds
 
     def _prepare_models(self, ):
+        self.mr_handle = ModalityHandle(
+            init_filters=self.super_params.init_filters,
+            in_channels=self.super_params.in_channels,
+            out_channels=self.super_params.num_classes,
+            num_init_blocks=self.super_params.num_init_blocks,
+        ).to(DEVICE)
         self.voxel_module = VoxelProcessingModule(
             ModalityHandle(
                 init_filters=self.super_params.init_filters,
                 in_channels=self.super_params.in_channels,
                 out_channels=self.super_params.num_classes,
                 num_init_blocks=self.super_params.num_init_blocks,
-                ),
+            ),
             num_up_blocks=self.super_params.num_up_blocks,
             ).to(DEVICE)
-        if self.super_params.pre_trained_module_dir is not None:
-            self.voxel_module.load_state_dict(torch.load(self.super_params.pre_trained_module_dir))
-        else:
-            print("WARN: loading no pre-trained voxel module")
-            self.pretrain_optimizer = torch.optim.SGD(
-                self.voxel_module.parameters(), 
-                lr=self.super_params.lr * 10
-                )
-            self.pretrain_lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.pretrain_optimizer)
-            self.pretrain_scaler = torch.cuda.amp.GradScaler()
-
+        # take the mesh at the first frame as template
+        template_mesh = next(iter(self.val_loader))["mr_template_meshes"].copy()
+        template_mesh["meshes"] = template_mesh.get("meshes")[0]
+        template_mesh["faces_labels"] = template_mesh["faces_labels"][:, :1]
         self.graph_module = RStGCN(
             hidden_features=32, num_blocks=3,
             sdm_out_channel=self.super_params.num_classes - 1,  # exclude background
-            template_mesh_dict=next(iter(self.val_loader))["ct_template_meshes"],
-            attention=False
+            template_mesh_dict=template_mesh,
+            attention=False,
+            task_code="whole_heart_meshing"
             ).to(DEVICE)
+        if self.super_params.pre_trained_ct_module_dir is not None and self.super_params.pre_trained_mr_module_dir is not None:
+            self.voxel_module.load_state_dict(torch.load(self.super_params.pre_trained_ct_module_dir))
+            self.mr_handle.load_state_dict(torch.load(self.super_params.pre_trained_mr_module_dir))
+        else:
+            print("WARN: loading no pre-trained voxel module")
 
         self.rasterizer = Rasterize(self.super_params.crop_window_size) # tool for rasterizing mesh
 
@@ -205,46 +220,48 @@ class TrainPipeline:
             softmax=True,
             squared_pred=False,
             ).to(DEVICE)
+        self.mesh_loss = TotalLosses(
+            lambda_chamfer=self.super_params.lambda_[1],
+            lambda_edge=self.super_params.lambda_[2],
+            lambda_face=self.super_params.lambda_[3],
+            lambda_laplacian=self.super_params.lambda_[4],
+            ).to(DEVICE)
 
         self.optimizer = torch.optim.Adam(
             chain(self.voxel_module.parameters(), self.graph_module.parameters()), 
             lr=self.super_params.lr
             )
-        self.lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer)
         self.scaler = torch.cuda.amp.GradScaler()
+        self.lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer)
 
         torch.backends.cudnn.enabled = torch.backends.cudnn.is_available()
         torch.backends.cudnn.benchmark = torch.backends.cudnn.is_available()
 
-    def pre_train_iter(self, epoch):
-        self.voxel_module.train()
+    def seudo_extractor(self, preds_seg, target_point_clouds):
+        try:
+            verts, *_ = marching_cubes(
+                preds_seg.squeeze(1).permute(0, 3, 2, 1), 
+                isolevel=0.5,
+                return_local_coords=True,
+            )
+            seudo_point_clouds = Pointclouds(points=verts.float())
+            seudo_point_clouds = seudo_point_clouds.subsample(2 * self.super_params.point_limit)
+        except AttributeError:
+            seudo_point_clouds = target_point_clouds
 
-        step = 0
-        train_loss_epoch = torch.tensor(0)
-        for step, train_data in enumerate(self.train_loader):
-            images_batch, labels_batch, labels_downsample_batch = (
-                train_data["ct_image"].as_tensor().to(DEVICE),
-                train_data["ct_label"].as_tensor().to(DEVICE),
-                train_data["ct_label_downsample"].as_tensor().to(DEVICE)
-                )
+        return seudo_point_clouds
 
-            self.pretrain_optimizer.zero_grad()
-            with torch.autocast(device_type=DEVICE):
-                preds_seg, preds_downsample_seg = self.voxel_module(images_batch)
-                loss_seg = self.seg_loss(preds_seg, labels_batch) + \
-                    self.downsample_seg_loss(preds_downsample_seg, labels_downsample_batch)
-
-            self.pretrain_scaler.scale(loss_seg).backward()
-            self.pretrain_scaler.step(self.pretrain_optimizer)
-            self.pretrain_scaler.update()
-
-            train_loss_epoch = loss_seg.detach().cpu() + train_loss_epoch
-
-        train_loss_epoch = train_loss_epoch / (step + 1)
-        wandb.log({"pre_train_loss": train_loss_epoch}, step=epoch + 1)
-        self.pretrain_lr_scheduler.step(train_loss_epoch)
-
-    def train_iter(self, epoch):
+    def train_iter(self, epoch, phase):
+        if phase == "pretrain":
+            modality = "ct"
+            data_loader = self.ct_train_loader
+        elif phase == "train":
+            modality = "mr"
+            data_loader = self.mr_train_loader
+            if epoch == self.super_params.delay_epochs:
+                self.voxel_module.modality_handle = self.mr_handle
+                self.graph_module.task_code = "dynamic_meshing"
+        
         self.voxel_module.train()
         self.graph_module.train()
 
@@ -252,55 +269,56 @@ class TrainPipeline:
         self.train_loss_epoch = {
             tag: torch.tensor(0) for tag in ["total", "seg", "chamfer", "edge", "face", "laplacian"]
             }
-        for step, train_data in enumerate(self.train_loader):
+        for step, train_data in enumerate(data_loader):
             images_batch, labels_batch, labels_downsample_batch = (
-                train_data["ct_image"].as_tensor().to(DEVICE),
-                train_data["ct_label"].as_tensor().to(DEVICE),
-                train_data["ct_label_downsample"].as_tensor().to(DEVICE)
+                train_data[f"{modality}_image"].as_tensor().to(DEVICE),
+                train_data[f"{modality}_label"].as_tensor(),
+                train_data[f"{modality}_label_downsample"].as_tensor()
                 )
-            template_meshes_batch, target_point_clouds_batch = (
-                train_data["ct_template_meshes"]["meshes"].to(DEVICE), 
-                train_data["ct_label_point_clouds"]["point_clouds"].to(DEVICE)
+            # convert multi-classes labels to binary classes
+            labels_batch = torch.logical_or(labels_batch == 2, labels_batch == 4).to(DEVICE)
+            labels_downsample_batch = torch.logical_or(
+                labels_downsample_batch == 2, labels_downsample_batch == 4
+            ).to(DEVICE)
+            template_meshes_batch, target_point_clouds = (
+                train_data[f"{modality}_template_meshes"]["meshes"].to(DEVICE),
+                train_data[f"{modality}_label_point_clouds"]["point_clouds"].to(DEVICE)
                 )
 
             self.optimizer.zero_grad()
             with torch.autocast(device_type=DEVICE):
                 preds_seg, preds_downsample_seg = self.voxel_module(images_batch)
-                loss_seg = self.seg_loss(preds_seg, labels_batch) + \
-                    self.downsample_seg_loss(preds_downsample_seg, labels_downsample_batch)
+                # calculate the loss only at the first (ED) and last (ES) frame
+                if phase == "pretrain":
+                    loss_seg = self.seg_loss(preds_seg, labels_batch) + \
+                        self.downsample_seg_loss(preds_downsample_seg, labels_downsample_batch)
+                else:
+                    preds_downsample_seg = preds_downsample_seg[[0, -1]]
+                    loss_seg = self.downsample_seg_loss(preds_downsample_seg, labels_downsample_batch)
                 
                 pred_meshes_batch = self.graph_module(
                     template_meshes_batch, preds_seg
                     )
-                loss_chamfer, *_ = chamfer_distance(
-                    pred_meshes_batch.verts_padded(), target_point_clouds_batch.points_padded(),
-                    )
-                loss_edges = mesh_edge_loss(pred_meshes_batch)
-                loss_faces = mesh_normal_consistency(pred_meshes_batch)
-                loss_laplacian = mesh_laplacian_smoothing(pred_meshes_batch)
-
-                # segmentation, chamfer distance, edge, face, and laplacian loss
-                total_loss = self.super_params.lambda_[0] * loss_seg + \
-                    self.super_params.lambda_[1] * loss_chamfer + \
-                        self.super_params.lambda_[2] * loss_edges + \
-                            self.super_params.lambda_[3] * loss_faces + \
-                                self.super_params.lambda_[4] * loss_laplacian
                 
+                preds_seg_ = torch.stack([self.post_transform(p) for p in preds_seg])  # get myocardium prediction
+                seudo_point_clouds = self.seudo_extractor(preds_seg_, target_point_clouds)    # get seudo point clouds
+                total_loss, log_losses = self.mesh_loss(pred_meshes_batch, seudo_point_clouds)
+                total_loss += self.super_params.lambda_[0] * loss_seg
+                log_losses["seg"] = self.super_params.lambda_[0] * loss_seg
+                log_losses["total"] = total_loss
+
             self.scaler.scale(total_loss).backward()
             self.scaler.step(self.optimizer)
             self.scaler.update()
 
-            for k, v in zip(
-                ["total", "seg", "chamfer", "edge", "face", "laplacian"],
-                [total_loss, loss_seg, loss_chamfer, loss_edges, loss_faces, loss_laplacian]
-                ):
+            for k, v in log_losses.items():
                 self.train_loss_epoch[k] = v.detach().cpu() + self.train_loss_epoch.get(k)
 
         for k, v in self.train_loss_epoch.items():
             self.train_loss_epoch[k] = v / (step + 1)
             self.train_loss[k] = np.append(self.train_loss[k], self.train_loss_epoch[k])
         wandb.log(
-            {"train_loss": self.train_loss_epoch["total"]}, 
+            {f"{phase}_loss": self.train_loss_epoch["total"]},
             step=epoch + 1
         )
         self.lr_scheduler.step(self.train_loss_epoch["total"])
@@ -309,12 +327,12 @@ class TrainPipeline:
         self.voxel_module.eval()
         self.graph_module.eval()
 
-        self.seg_metric_batch_decoder = DiceMetric(
+        seg_metric_batch_decoder = DiceMetric(
             include_background=False,
             reduction="mean_batch", 
             num_classes=self.super_params.num_classes
             )
-        self.msh_metric_batch_decoder = DiceMetric(
+        msh_metric_batch_decoder = DiceMetric(
             include_background=False,
             reduction="mean_batch", 
             num_classes=self.super_params.num_classes
@@ -325,63 +343,62 @@ class TrainPipeline:
         with torch.no_grad():
             for step, val_data in enumerate(self.val_loader):
                 images_batch, labels_batch = (
-                    val_data[f"ct_image"].as_tensor().to(DEVICE),
-                    val_data[f"ct_label"].as_tensor().to(DEVICE),
+                    val_data["mr_image"].as_tensor().to(DEVICE),
+                    val_data["mr_label"].as_tensor(),
                     )
-                template_meshes, faces_labels = (
-                    val_data["ct_template_meshes"]["meshes"].to(DEVICE),
-                    val_data["ct_template_meshes"]["faces_labels"].to(DEVICE)
-                    )
+                # convert multi-classes labels to binary classes, and to one-hot encoding
+                labels_batch = torch.logical_or(labels_batch == 2, labels_batch == 4)
+                labels_batch = F.one_hot(labels_batch.to(torch.int64).squeeze(1), num_classes=self.super_params.num_classes).permute(0, 4, 1, 2, 3).to(DEVICE)
+                template_meshes = val_data["mr_template_meshes"]["meshes"].to(DEVICE)
 
                 preds_seg, _ = self.voxel_module(images_batch)
                 pred_meshes = self.graph_module(
                     template_meshes, preds_seg
                     )
-                preds_seg = self.post_transform(preds_seg.squeeze()).unsqueeze(0)
-                self.seg_metric_batch_decoder(preds_seg, labels_batch)
+                preds_seg_ = torch.stack([self.post_transform(p) for p in preds_seg[[0, -1]]])
+                # TODO: evaluate the error only at slice position before interpolation
+                seg_metric_batch_decoder(preds_seg_, labels_batch)
 
-                pred_meshes = pred_meshes.submeshes([list(
-                    faces_index.nonzero().flatten() - 1 for faces_index in faces_labels.squeeze()
-                    )])
+                pred_meshes = pred_meshes[[0, -1]]
                 pred_voxels_batch = []
                 for pred_mesh in pred_meshes:
                     pred_voxels = self.rasterizer(
                         pred_mesh.verts_padded(), pred_mesh.faces_padded()
                     )
                     pred_voxels_batch.append(pred_voxels)
-                pred_voxels_batch = torch.cat([torch.zeros_like(pred_voxels_batch[0]), *pred_voxels_batch], dim=1)
-                pred_voxels_batch = self.post_transform(pred_voxels_batch.squeeze()).unsqueeze(0)
-                self.msh_metric_batch_decoder(pred_voxels_batch, labels_batch)
+                pred_voxels_batch = torch.cat(pred_voxels_batch, dim=0)
+                pred_voxels_batch = self.post_transform(pred_voxels_batch.squeeze(0))
+                # TODO: evaluate the error between seudo mesh and predicted mesh
+                msh_metric_batch_decoder(pred_voxels_batch, labels_batch)
 
                 if step == choice_case:
                     cached_data = {
                         # "template_meshes": template_meshes.cpu(),
                         # "images_batch": images_batch.cpu(),
                         # "labels_batch": labels_batch.cpu(),
+                        "labels_point_clouds": val_data["mr_label_point_clouds"]["point_clouds"],
                         # "preds_seg": preds_seg.cpu(),
-                        "labels_point_clouds": val_data["ct_label_point_clouds"]["point_clouds"],
                         "pred_meshes": pred_meshes.cpu(),
                     }
 
         # log dice score
-        for v, k in enumerate(["lv", "lv-myo", "rv", "la", "ra", "av"]):
-            self.eval_seg_score[k] = np.append(self.eval_seg_score[k], self.seg_metric_batch_decoder.aggregate()[v].cpu())
-            self.eval_msh_score[k] = np.append(self.eval_msh_score[k], self.msh_metric_batch_decoder.aggregate()[v].cpu())
-        draw_train_loss(self.train_loss, self.super_params)
-        draw_eval_score(self.eval_seg_score, self.super_params, task_code="whole_heart_meshing", module="seg")
-        draw_eval_score(self.eval_msh_score, self.super_params, task_code="whole_heart_meshing", module="msh")
+        self.eval_seg_score["myo"] = np.array([seg_metric_batch_decoder.aggregate().cpu()])
+        self.eval_msh_score["myo"] = np.array([msh_metric_batch_decoder.aggregate().cpu()])
+        draw_train_loss(self.train_loss, self.super_params, task_code="dynamic_meshing")
+        draw_eval_score(self.eval_seg_score, self.super_params, task_code="dynamic_meshing", module="seg")
+        draw_eval_score(self.eval_msh_score, self.super_params, task_code="dynamic_meshing", module="msh")
         wandb.log({
             "train_categorised_loss": wandb.Table(
             columns=[f"train_loss \u2193", f"eval_seg_score \u2191", f"eval_msh_score \u2191"],
             data=[[
-                wandb.Image(f"{self.super_params.log_dir}/whole_heart_meshing/{self.super_params.run_id}/train_loss.png"),
-                wandb.Image(f"{self.super_params.log_dir}/whole_heart_meshing/{self.super_params.run_id}/eval_seg_loss.png"),
-                wandb.Image(f"{self.super_params.log_dir}/whole_heart_meshing/{self.super_params.run_id}/eval_msh_loss.png"),
+                wandb.Image(f"{self.super_params.log_dir}/dynamic_meshing/{self.super_params.run_id}/train_loss.png"),
+                wandb.Image(f"{self.super_params.log_dir}/dynamic_meshing/{self.super_params.run_id}/eval_seg_loss.png"),
+                wandb.Image(f"{self.super_params.log_dir}/dynamic_meshing/{self.super_params.run_id}/eval_msh_loss.png"),
                 ]]
             )},
             step=epoch + 1
             )
-        eval_score_epoch = self.msh_metric_batch_decoder.aggregate().mean()
+        eval_score_epoch = msh_metric_batch_decoder.aggregate().mean()
         wandb.log({"eval_score": eval_score_epoch}, step=epoch + 1)
 
         # save model
@@ -391,6 +408,10 @@ class TrainPipeline:
         torch.save(
             self.voxel_module.state_dict(),
             os.path.join(self.log_dir, "ckpt_weights", f"{epoch + 1}_VoxelProcess.pth")
+        )
+        torch.save(
+            self.mr_handle.state_dict(),
+            os.path.join(self.log_dir, "ckpt_weights", f"{epoch + 1}_MRHandle.pth")
         )
         torch.save(
             self.graph_module.state_dict(),
@@ -416,8 +437,8 @@ class TrainPipeline:
                     #     pred_seg=cached_data["preds_seg"]
                     #     )),
                     "point_cloud_label vs mesh_pred": wandb.Plotly(draw_plotly(
-                        point_clouds=cached_data["labels_point_clouds"], 
-                        pred_meshes=cached_data["pred_meshes"]
+                        point_clouds=cached_data["labels_point_clouds"][0], #ED frame for visualisation
+                        pred_meshes=cached_data["pred_meshes"][0]   #ED frame for visualisation
                         ))
                 },
                 step=epoch + 1
@@ -437,32 +458,20 @@ class TrainPipeline:
         # testing
         with torch.no_grad():
             for val_data in self.val_loader:
-                images_batch, labels_batch = (
-                    val_data[f"ct_image"].as_tensor().to(DEVICE),
-                    val_data[f"ct_label"].as_tensor().to(DEVICE),
-                    )
-                template_meshes, faces_labels = (
-                    val_data["ct_template_meshes"]["meshes"].to(DEVICE),
-                    val_data["ct_template_meshes"]["faces_labels"].to(DEVICE)
-                    )
+                images_batch = val_data[f"mr_image"].as_tensor().to(DEVICE)
+                template_meshes = val_data["mr_template_meshes"]["meshes"].to(DEVICE)
 
                 preds_seg, _ = self.voxel_module(images_batch)
                 pred_meshes = self.graph_module(
                     template_meshes, preds_seg
                     )
-                preds_seg = self.post_transform(preds_seg.squeeze()).unsqueeze(0)
-                preds_seg = F.one_hot(
-                    preds_seg.squeeze(1).long(), num_classes=self.super_params.num_classes
-                ).permute(0, 4, 1, 2, 3).squeeze()[1:]  # exclude background
-                pred_meshes = pred_meshes.submeshes([list(
-                    faces_index.nonzero().flatten() - 1 for faces_index in faces_labels.squeeze()
-                    )])
-                label_names = ["lv", "lv_myo", "rv", "rv_myo", "la", "ra"]
-                for i in range(len(label_names)):
-                    seg2mesh = matrix_to_marching_cubes(preds_seg[i].cpu())
-                    seg2mesh.export(f"{self.out_dir}/{label_names[i]}_pred_VoxelProcess.obj")
+                preds_seg_ = torch.stack([self.post_transform(p) for p in preds_seg[[0, -1]]]).squeeze(1)
+                pred_meshes = pred_meshes[[0, -1]]
+                for i, frame in enumerate(["ed", "es"]):
+                    seg2mesh = matrix_to_marching_cubes(preds_seg_[i].cpu())
+                    seg2mesh.export(f"{self.out_dir}/{frame}_pred_VoxelProcess.obj")
                     save_obj(
-                        f"{self.out_dir}/{label_names[i]}_pred_RStGCN.obj", 
+                        f"{self.out_dir}/{frame}_pred_RStGCN.obj", 
                         pred_meshes[i].verts_packed(), pred_meshes[i].faces_packed()
                     )
 

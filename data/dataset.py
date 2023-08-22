@@ -56,10 +56,10 @@ def collate_batched_meshes(batch: list) -> dict:
                         mesh_dict["faces_labels"] for mesh_dict in collated_dict[k]
                         ]),
                     }
-                
             elif "mr" in k:
-                # do nothing, the batch must be one. each Meshes object contains a number of frames of meshes
-                pass
+                assert len(collated_dict[k]) == 1, "WARNING: works only for batch size of 1 and dynamic meshing task"
+                collated_dict[k] = collated_dict[k][0]
+
         elif "point_clouds" in k:
             if "ct" in k:
                 collated_dict[k] = {
@@ -72,9 +72,14 @@ def collate_batched_meshes(batch: list) -> dict:
                         ]),
                 }
             elif "mr" in k:
-                pass
+                assert len(collated_dict[k]) == 1, "WARNING: works only for batch size of 1 and dynamic meshing task"
+                collated_dict[k] = collated_dict[k][0]
+
         else:
             collated_dict[k] = list_data_collate(collated_dict[k])
+            if "mr" in k:
+                assert len(collated_dict[k]) == 1, "WARNING: works only for batch size of 1"
+                collated_dict[k] = collated_dict[k].permute(1, 0, 2, 3, 4)
     
     return collated_dict
 
