@@ -59,7 +59,7 @@ def config():
     parser.add_argument("--delay_epochs", type=int, default=150, help="the number of epochs for pre-training")
     parser.add_argument("--val_interval", type=int, default=25, help="the interval of validation")
 
-    parser.add_argument("--lr", type=float, default=1e-3, help="the learning rate for training")
+    parser.add_argument("--lr", type=float, default=1e-4, help="the learning rate for training")
     parser.add_argument("--crop_window_size", type=int, nargs='+', default=[128, 128, 128], help="the size of the crop window for training")
     parser.add_argument("--point_limit", type=int, default=11_612, help="the number limits of points for each mesh, it's a number will be defined in the pre-processing")
     parser.add_argument("--lambda_", type=float, nargs='+', default=[0.1, 1.0, 0.1, 0.1, 0.1], help="the coefficients of segmentation, chamfer distance, edge, face, and laplacian loss")

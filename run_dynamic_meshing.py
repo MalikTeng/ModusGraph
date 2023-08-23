@@ -259,7 +259,8 @@ class TrainPipeline:
             modality = "mr"
             data_loader = self.mr_train_loader
             if epoch == self.super_params.delay_epochs:
-                self.voxel_module.modality_handle = self.mr_handle
+                for name, param in self.voxel_module.modality_handle.named_parameters():
+                    param.data = self.mr_handle.state_dict()[name].data
                 self.graph_module.task_code = "dynamic_meshing"
         
         self.voxel_module.train()
