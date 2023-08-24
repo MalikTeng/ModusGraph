@@ -116,7 +116,7 @@ def train(**kwargs):
             super_params.pre_trained_mr_module_dir = None
     run_id = f"{time.strftime('%Y-%m-%d-%H%M', time.localtime(time.time()))}"
     super_params.run_id = run_id
-    wandb.init(project="ModusGraph_whole_heart_meshing", name=run_id, config=super_params, mode="online")
+    wandb.init(project="ModusGraph_dynamic_meshing", name=run_id, config=super_params, mode="online")
     pipeline = TrainPipeline(
         super_params=super_params,
         seed=2048, num_workers=0,
