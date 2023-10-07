@@ -1,9 +1,9 @@
 # Introduction
-This repository includes scripts and tools running code for paper, [ModusGraph: Automated 3D and 4D Mesh Model Reconstruction from cine CMR with Improved Accuracy and Efficiency](https://link.springer.com/chapter/10.1007/978-3-031-43990-2_17). Sole purpose of this repository is to provide a reference for the paper, and it is not optimized for efficiency and not guaranteed to be bug-free. The code is written in Python 3.9.16 and Pytorch 1.12.1.
+This repository contains scripts and tools that run code for the paper titled ‘[ModusGraph: Automated 3D and 4D Mesh Model Reconstruction from cine CMR with Improved Accuracy and Efficiency](https://link.springer.com/chapter/10.1007/978-3-031-43990-2_17)’. The sole purpose of this repository is to provide a reference for the paper. Please note that the code is written in Python 3.9.16 and Pytorch 1.12.1, and is not optimized for efficiency or guaranteed to be bug-free.
  
 ![Alt text](figure/Fig-1.png)
 
-To better understand the idea behind the network design and parameter settings, please watch the following biref presentation with your MICCAI 23 virtual access.
+To gain a better understanding of the idea behind the network design and parameter settings, we invite you to watch the following brief presentation using your MICCAI 23 virtual access.
 [URL]
 
 # Installation
