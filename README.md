@@ -3,9 +3,9 @@ This repository contains scripts and tools that run code for the paper titled â€
  
 ![Alt text](figure/Fig-1.png)
 
-To gain a better understanding of the idea behind the network design and parameter settings, we invite you to watch the following brief presentation using your MICCAI 23 virtual access.
+To gain a better understanding of the idea behind the network design and parameter settings, we invite you to watch the following brief presentation using your MICCAI 2023 access.
 
-[MICCAI Virtual Venue](https://miccai2023.conflux.events/app/schedule/session/3294/2693)
+[MICCAI Virtual Presentation](https://miccai2023.conflux.events/app/schedule/session/3294/2693)
 
 # Installation
 The code is tested on Ubuntu 18.04.6 LTS. To install the code, first clone the repository:
