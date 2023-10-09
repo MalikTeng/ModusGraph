@@ -7,6 +7,9 @@ To gain a better understanding of the idea behind the network design and paramet
 
 [MICCAI Virtual Presentation](https://miccai2023.conflux.events/app/schedule/session/3294/2693)
 
+## Connect and Contact with the Author
+[LinkedIn](https://www.linkedin.com/in/malik-teng-86085149/)
+
 # Installation
 The code is tested on Ubuntu 18.04.6 LTS. To install the code, first clone the repository:
 
@@ -106,6 +109,3 @@ Running the dynamic meshing process is very similar except arguments need for bo
     --point_limit 53_500 \
 
     --cache_rate 1.0
-
-## Connect and Contact with the Author
-[LinkedIn](https://www.linkedin.com/in/malik-teng-86085149/)
