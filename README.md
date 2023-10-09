@@ -69,7 +69,7 @@ Parameters of the network is customizable but not recommended.
 We recommand using Weights and Bias for monitoring the training process. Following snapshot shows the training process of the two training stages.
 ![Alt Text](figure/wandb_screenshot.png)
 
-## TL;DR
+## Command line Running
 Running the whole training process is straightforward, just use commandline tool. See details of adjustable parameters in the script.
 
     $ python main-whole_heart_meshing.py \
