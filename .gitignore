@@ -1,0 +1,13 @@
+.vscode
+__pycache__
+remove_later
+wandb
+
+# comment out the following if enormous changes are made
+data
+# figure
+model
+results
+template
+template_creator
+utils

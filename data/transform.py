@@ -41,12 +41,8 @@ __all__ = ["pre_transform"]
 
 def pre_transform(
         keys: tuple,
-        dataset: str,
         crop_window_size: list,
         section: str,
-        point_limit: int,
-        one_or_multi: str,
-        template_dir: str,
 ):
     """
     Conducting pre-transformation that comprises multichannel conversion,
@@ -54,39 +50,23 @@ def pre_transform(
     normalization and data augmentation.
     
     :params keys: designated items (at most two) for pre-transformation, image and label
-    :params dataset: ID of dataset that is used
     :params crop_window_size: image and label will be cropped to match the size of network input
     :params section: identifier of either training, validation or testing set
     """
     # data loading
     transforms = [
         LoadImaged(
-            keys, 
-            reader="NibabelReader",
-            ensure_channel_first=True,
+            keys, ensure_channel_first=True,
+            image_only=True,
             dtype=(np.float32, np.int32)
         ),
-        ToMetaTensord(keys)
+        # ToMetaTensord(keys)
+        Spacingd(keys, pixdim=(2.0, 2.0, -1), mode=("bilinear", "nearest")),
+        Orientationd(keys, axcodes="RAS"),
+        # Spacingd(keys, pixdim=(-1, 2.0, 2.0), mode=("bilinear", "nearest")), # Particularly, ACDC
+        Spacingd(keys, pixdim=(2.0, -1, -1), mode=("bilinear", "nearest")),
     ]
 
-    # label indices correction
-    if one_or_multi == "multi":
-        # static CT images and multi-classes labels shall be processed for the whole heart meshing task, and only data from SCOT-HEART is available
-        if dataset.lower() == "scotheart":
-            transforms.append(ConvertToMultiChannelBasedOnSCOTHEARTClassesd(keys[1]))
-        else:
-            raise ValueError(f"the function to process labels from {dataset} is not defined for {one_or_multi} task.")
-    else:
-        # both static CT images and labels and dynamic MR images and labels shall be processed for the dynamic meshing task.
-        # the first channel is number of frames, and labels are not in one-hot format
-        if dataset.lower() == "scotheart":
-            transforms.append(Flipd(keys, spatial_axis=0))
-            pass
-        elif dataset.lower() == "cap":
-            transforms.append(SelectFramesd(keys[1]))
-        else:
-            raise ValueError(f"the function to process labels from {dataset} is not defined for {one_or_multi} task.")
- 
     # process images and labels
     transforms.extend(
         [
@@ -113,16 +93,6 @@ def pre_transform(
                 mode="minimum",
             ),
             
-            # generate meshes from voxel label maps
-            GenerateMeshesd(
-                keys,
-                one_or_multi=one_or_multi,
-                dataset=dataset,
-                size=max(crop_window_size),
-                point_limit=point_limit,
-                template_dir=template_dir,
-            ),
-
             # generate downsampled label maps
             Spacingd(
                 f"{keys[1]}_downsample",
@@ -140,7 +110,6 @@ def pre_transform(
                 spatial_size=max(crop_window_size) // 8,
                 mode="minimum",
             ),
-            MergeMultiChanneld([keys[1], f"{keys[1]}_downsample"]) if dataset.lower() == "scotheart" else Identityd(),
         ]
     )
 
@@ -162,27 +131,3 @@ def pre_transform(
     transforms.append(ScaleIntensityd(keys[0], minv=0, maxv=1))
 
     return Compose(transforms)
-
-
-# def mask_ground_truth(batch_data, keys):
-#     """
-#     Source the true slice position for each label
-#     :param: batch_data: a batch of MR data comprises array, meta_dict and foreground coordinates
-#     :param: crop_window_size: the size of network input
-
-#     :return:    mask of slices with manual labels (1 for labels and 0 for others).
-#     """
-#     label = batch_data[keys[1]].get_array(np.ndarray)
-#     B, _, H, W, D = np.round(label.shape).astype(int)
-#     start_idx = [np.min(np.nonzero(i)[-1]) for i in np.argmax(label, axis=1)]
-#     dz = [
-#         torch.round(batch_data[keys[1]].meta["pixdim"][i, 3]).int().item()
-#         for i in range(B)
-#     ]
-
-#     masks = np.zeros((B, 1, H, W, D))
-#     for i in range(B):
-#         masks[i, ..., np.arange(start_idx[i], D, dz[i])] = 1
-#     masks = masks.astype(bool)
-
-#     return torch.from_numpy(masks)

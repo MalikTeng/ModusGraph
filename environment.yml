@@ -182,4 +182,4 @@ dependencies:
       - wcwidth==0.2.6
       - werkzeug==2.3.6
       - zipp==3.15.0
-prefix: /mnt/DATA/miniconda3/envs/modusgraph
+prefix: /mnt/data/miniconda3/envs/modusgraph

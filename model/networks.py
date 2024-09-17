@@ -18,14 +18,17 @@ from torch_geometric.utils import degree
 from torch_geometric.utils.to_dense_adj import to_dense_adj
 from torch_geometric_temporal.nn.recurrent import GConvGRU, DyGrEncoder
 from pytorch3d.structures import Meshes
+from pytorch3d.ops.subdivide_meshes import SubdivideMeshes
 from einops.einops import rearrange, repeat
 from einops.layers.torch import Rearrange
 # import FastGeodis
+from monai.transforms.utils import distance_transform_edt
 
 from model.parts import *
 
 
-__all__ = ["VoxelProcessingModule", "ModalityHandle", "RStGCN"]
+__all__ = ["ResNetDecoder", "ModalityHandle", "RStGCN"]
+# __all__ = ["VoxelProcessingModule", "ModalityHandle", "RStGCN"]
 
 
 class VoxelProcessingModule(nn.Module):
@@ -51,28 +54,6 @@ class VoxelProcessingModule(nn.Module):
 
         return x, x_seg
 
-# code for the paper
-# class VoxelProcessingModule(nn.Module):
-#     def __init__(
-#         self,
-#         modality_handle: nn.Module,
-#         use_conv_final: bool = True,
-#         num_up_blocks: tuple = (1, 1, 1),
-#         ):
-#         super(VoxelProcessingModule, self).__init__()
-
-#         self.modality_handle = modality_handle
-#         self.decoder = ResNetDecoder(
-#             modality_handle.init_filters, modality_handle.out_channels,
-#             modality_handle.act, modality_handle.norm,
-#             use_conv_final, num_up_blocks
-#         )
-
-#     def forward(self, x):
-#         x, x_mid = self.modality_handle(x)
-#         x, _ = self.decoder(x)
-
-#         return x, x_mid
 
 class ModalityHandle(nn.Module):
     def __init__(
@@ -135,79 +116,6 @@ class ModalityHandle(nn.Module):
         x_seg = self.seg_blocks[-1](x)
 
         return x, x_seg
-
-# code for the paper
-# class ModalityHandle(nn.Module):
-#     def __init__(
-#         self,
-#         init_filters: int = 8,
-#         in_channels: int = 4,
-#         out_channels: int = 1,
-#         act: str = 'relu',
-#         norm: str = 'batchnorm',
-#         num_init_blocks: tuple = (1, 2, 2, 4),
-#         ):
-#         super(ModalityHandle, self).__init__()
-
-#         self.init_filters = init_filters
-#         self.in_channels = in_channels
-#         self.out_channels = out_channels
-#         self.act = act
-#         self.norm = norm
-#         self.num_layers_blocks = num_init_blocks
-
-#         self.seg_blocks = nn.ModuleList([
-#             ConvLayer(
-#                 'relu', norm,
-#                 in_channels, out_channels * 4
-#                 ),
-#             ResBlock(
-#                 out_channels * 4, None,
-#                 act, norm, num_layers=4
-#                 ),
-#             ConvLayer(
-#                 # 'tanh', norm,
-#                 'prelu', norm,
-#                 out_channels * 4, out_channels
-#                 )
-#             ])
-        
-#         self.blocks = self._make_block_layers(len(num_init_blocks))
-
-#     def _make_block_layers(self, num_blocks):
-#         blocks = nn.ModuleList()
-#         previous_in_channels = 0
-#         for i in range(num_blocks):
-#             in_channels = self.init_filters * 2 ** i
-#             blocks.append(
-#                 ResBlock(
-#                     previous_in_channels + in_channels // 2 if i > 0 else self.out_channels, in_channels,
-#                     act=self.act, norm=self.norm,
-#                     num_layers=self.num_layers_blocks[i]
-#                     )
-#                 )
-#             previous_in_channels = \
-#                 previous_in_channels + in_channels // 2 if i > 0 \
-#                     else self.out_channels
-
-#         return blocks
-
-#     def forward(self, x):
-#         x = self.seg_blocks[0](x)
-#         for block in self.seg_blocks[1:-1]:
-#             x, _ = block(x)
-#         x = self.seg_blocks[-1](x)
-
-#         x_ = one_hot(
-#             torch.argmax(x, dim=1, keepdim=True),
-#             num_classes=self.out_channels,
-#             dtype=x.dtype
-#             )
-#         for block in self.blocks[:-1]:
-#             x_, _ = block(x_)
-#         _, x_ = self.blocks[-1](x_)
-
-#         return x_, x
 
 
 class GraphAAGCN:
@@ -494,16 +402,15 @@ class RStGCN(nn.Module):
         hidden_features: int,
         num_blocks: int,
         sdm_out_channel: int,
-        template_mesh_dict: dict,
+        template_mesh: dict,
         stride: int = 1,
         residual: bool = True,
         adaptive: bool = True,
         attention: bool = True,
-        task_code: str = "whole_heart_meshing"
+        task_code: str = "stationary"
         ):
         super(RStGCN, self).__init__()
         self.task_code = task_code
-        template_mesh, faces_labels = template_mesh_dict["meshes"], template_mesh_dict["faces_labels"]
         self.graph = GraphAAGCN(
             template_mesh.edges_packed().T, template_mesh._V
         )
@@ -523,18 +430,18 @@ class RStGCN(nn.Module):
             in_channels = out_channels
         self.graph_fc = nn.Sequential(
             nn.Linear(out_channels, hidden_features),
-            nn.PReLU(),
+            nn.PReLU(init=1e-3),
             nn.Linear(hidden_features, 3),
-            nn.Tanh()
+            # nn.Tanh()
         )
         
         self.sdm_fc = nn.Sequential(
             nn.Linear(sdm_out_channel, hidden_features),
-            nn.PReLU(),
+            nn.PReLU(init=1e-3),
             nn.Linear(hidden_features, 3),  # number of classes -> number of vertex dimension
-            nn.Tanh()
+            # nn.Tanh()
         )
-        self.subdvider = SubdivideMeshes(template_mesh, faces_labels)
+        self.subdvider = SubdivideMeshes()
 
         self.tcn1 = UnitTCN(out_channels, out_channels, stride=stride)
         self.relu = nn.ReLU(inplace=True)
@@ -556,14 +463,14 @@ class RStGCN(nn.Module):
     def _init_weights(self):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode="fan_out")
+                nn.init.kaiming_normal_(m.weight, 1e-2, mode="fan_out")
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
             elif isinstance(m, nn.BatchNorm2d):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
             elif isinstance(m, nn.Linear):
-                nn.init.xavier_normal_(m.weight)
+                nn.init.xavier_normal_(m.weight, 1e-2)
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
     
@@ -578,132 +485,62 @@ class RStGCN(nn.Module):
                 ]
             )
 
-    def _sdm_sample(self, v_pos, x_batch):
-        # x_batch = x_batch[:, 1:].float() # remove background
-        # for b in range(x_batch.shape[0]):
-        #     x_batch[b] = FastGeodis.signed_generalised_geodesic3d(
-        #         x_batch[b].unsqueeze(0), x_batch[b].unsqueeze(0),
-        #         spacing=[1, 1, 1], v=1, lamb=1.0, iter=4
-        #         )
-        x_batch = x_batch[:, 1:] # remove background
+    @ torch.no_grad()
+    def _sdf_sampling(self, v_pos, seg_batch):
+        b, c, s, *_ = seg_batch.shape
+        assert c == 1, "The input segmentation must be single channel."
+        for i in range(b):
+            # seg_batch[b] = FastGeodis.signed_generalised_geodesic3d(
+            #     seg_batch[b].unsqueeze(0), seg_batch[b].unsqueeze(0),
+            #     spacing=[1, 1, 1], v=1, lamb=1.0, iter=4
+            #     )
+            seg_batch[i] = distance_transform_edt(seg_batch[i]) + \
+                distance_transform_edt(1 - seg_batch[i])
 
         v_grid = rearrange(v_pos, "b v p -> b v () () p")
-        x_batch = F.grid_sample(
-            x_batch, v_grid,
-            mode='bilinear',
-            padding_mode='border',
-            align_corners=True
+        seg_batch = F.grid_sample(
+            seg_batch.permute(0, 1, 4, 2, 3).float(), 
+            v_grid,
+            mode='nearest', 
+            padding_mode='border'
             )
-        x_batch = rearrange(x_batch, 'b c v () () -> b v c')
-        v_pos = v_pos + self.sdm_fc(x_batch)
+        seg_batch = rearrange(seg_batch, 'b c v () () -> b v c')
+        v_pos = (v_pos / 2 + 0.5) * s   # transform from NDC space to image space
+        v_pos = v_pos + self.sdm_fc(seg_batch)
+        v_pos = 2 * (v_pos / s - 0.5)   # transform from image space to NDC space
 
         return v_pos
 
-    def forward(self, mesh_batch: Meshes, seg_batch: Tensor, subdivision: bool = False):
+    def forward(self, mesh_batch: Meshes, seg_batch: Tensor, subdiv_level: int=2):
         # Signed Distance Map
-        v_batch = mesh_batch.verts_padded()
-        v_batch_ = self._sdm_sample(v_batch, seg_batch)
+        v_pos = mesh_batch.verts_padded()
+        v_pos_sdf = self._sdf_sampling(v_pos, seg_batch)
 
         # R-StGCN
         for agcn, cgcn in zip(self.agcn_stack, self.cgcn_stack):
-            if self.task_code.lower().strip(' ') == "whole_heart_meshing":
-                v_batch_ = rearrange(v_batch_, "b p f -> b f () p")
-                v_batch_ = agcn(v_batch_)
-                v_batch_ = rearrange(v_batch_, "b f () p -> (b p) f")
-                v_batch_ = cgcn(v_batch_, mesh_batch.edges_packed().T)
-                v_batch_ = rearrange(v_batch_, "(b p) f -> b p f", b=seg_batch.shape[0])
-            else:
-                v_batch_ = rearrange(v_batch_, 'l p f -> () f l p')
-                v_batch_ = agcn(v_batch_)
-                v_batch_ = rearrange(v_batch_, '() f l p -> (l p) f')
-                v_batch_ = cgcn(v_batch_, mesh_batch.edges_packed().T)
-                v_batch_ = rearrange(v_batch_, "(l p) f -> l p f", l=seg_batch.shape[0])
+            if self.task_code.lower().strip(' ') == "stationary":
+                v_pos_sdf = rearrange(v_pos_sdf, "b p f -> b f () p")
+                v_pos_sdf = agcn(v_pos_sdf)
+                v_pos_sdf = rearrange(v_pos_sdf, "b f () p -> (b p) f")
+                v_pos_sdf = cgcn(v_pos_sdf, mesh_batch.edges_packed().t().contiguous())
+                v_pos_sdf = rearrange(v_pos_sdf, "(b p) f -> b p f", b=seg_batch.shape[0])
+            else:   # TODO: implement the non-stationary version
+                raise NotImplementedError("Non-stationary R-StGCN is not implemented yet.")
+                # v_batch_ = rearrange(v_batch_, 'l p f -> () f l p')
+                # v_batch_ = agcn(v_batch_)
+                # v_batch_ = rearrange(v_batch_, '() f l p -> (l p) f')
+                # v_batch_ = cgcn(v_batch_, mesh_batch.edges_packed().T)
+                # v_batch_ = rearrange(v_batch_, "(l p) f -> l p f", l=seg_batch.shape[0])
  
         # Deform meshes
-        v_batch_ = self.graph_fc(v_batch_)
-        v_batch_ = rearrange(v_batch_, "b p f -> (b p) f")
+        v_offset = self.graph_fc(v_pos_sdf)
 
-        if subdivision:
-            # Surface Subdivision
-            # WARNING: will change the number of vertices, edges, and faces
-            mesh_batch = mesh_batch.offset_verts(v_batch_)
-            mesh_batch, faces_labels, _ = self.subdvider(mesh_batch)
+        v_offset = rearrange(v_offset, "b p f -> (b p) f")
+        mesh_batch = mesh_batch.offset_verts(v_offset)
 
-            return mesh_batch, faces_labels
-        else:
-            mesh_batch = mesh_batch.offset_verts(v_batch_)
+        if subdiv_level > 0:
+            for _ in range(subdiv_level):
+                mesh_batch = self.subdvider(mesh_batch)
 
-            return mesh_batch
+        return mesh_batch
 
-
-# The following is test only code
-
-class Args:
-    def __init__(self):
-        self.keys = ("ct_image", "ct_label")
-        self.dataset = "scotheart"
-        self.crop_window_size = [128, 128, 128]
-        self.section = "test"
-        self.point_limit = 5_806
-        self.one_or_multi = "solo"
-        self.template_dir = "/home/yd21/Documents/ModusGraph/template/cap/"
-
-if __name__ == "__main__":
-    from data.transform import pre_transform
-    from pytorch3d.structures import Pointclouds
-    args = Args()
-    test_transform = pre_transform(
-        keys=args.keys, dataset=args.dataset, crop_window_size=args.crop_window_size,
-        section=args.section, point_limit=args.point_limit, 
-        one_or_multi=args.one_or_multi, template_dir=args.template_dir
-    )
-    voxel_module = VoxelProcessingModule(
-        ModalityHandle(
-            init_filters=8,
-            in_channels=1,
-            out_channels=2, # myocardium and background
-            num_init_blocks=(1, 2, 2, 4),
-            ),
-        num_up_blocks=(1, 1, 1),
-        ).to("cuda")
-        
-    # print structure of modality handle
-    print(voxel_module.modality_handle)
-    # print structure of ResNet decoder
-    print(voxel_module.resnet_decoder)
-    
-    source_root_dir = "/mnt/data/Experiment/nnUNet/nnUNet_raw/nnUNet_raw_data/Task504_SCOTHEART/"
-    patient_list = [i.strip(".nii.gz") for i in os.listdir(f"{source_root_dir}/labelsTr")][:1]
-    for patient_id in patient_list:
-        image_dir = os.path.join(
-            source_root_dir, "imagesTr", f"{patient_id}_0000.nii.gz"
-        )
-        label_dir = os.path.join(
-            source_root_dir, "labelsTr", f"{patient_id}.nii.gz"
-        )
-        output_data = test_transform({
-            "ct_image": image_dir,
-            "ct_label": label_dir
-        })
-        image = output_data["ct_image"].as_tensor().unsqueeze(1).to("cuda")
-        template_mesh = output_data["ct_template_meshes"]["meshes"].to("cuda")
-
-        output_data["ct_template_meshes"]["meshes"] = output_data["ct_template_meshes"]["meshes"][0]
-        output_data["ct_template_meshes"]["faces_labels"] = output_data["ct_template_meshes"]["faces_labels"][:, :1]
-        graph_module = RStGCN(
-            hidden_features=32, num_blocks=3,
-            sdm_out_channel=1,  # the number of classes (out_channel) excludeing background
-            template_mesh_dict=output_data["ct_template_meshes"],
-            attention=False,
-            task_code="dynamic_meshing"
-        ).to("cuda")
-        # print structure of graph module
-        print(graph_module)
-
-        pred_seg, pred_seg_downsample = voxel_module(image)
-        print(f"Voxel Module Output Shape:\t{pred_seg.shape} | {pred_seg_downsample.shape}")
-        template_mesh = template_mesh.to("cuda")
-        pred_meshes_batch = graph_module(template_mesh, pred_seg, subdivision=False)
-        print(f"Graph Module Output Shape:\t{pred_meshes_batch.verts_padded().shape} | {pred_meshes_batch.faces_padded().shape}")
-        # pred_meshes_batch, new_faces_labels = graph_module(template_mesh, pred_seg, subdivision=False)
-        # print(f"Graph Module Output Shape:\t{pred_meshes_batch.verts_padded().shape} | {new_faces_labels.shape}")

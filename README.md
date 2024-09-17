@@ -40,13 +40,9 @@ data
 Template meshes were needed for runing the code. The template meshes are included for reference. The template meshes are organized in the following structure:
 ```
 template
-|── scotheart
-|   ├── 1.obj
-|   ├── 2.obj
-|   ├── ...
-|   └── 6.obj
-|── cap
-|   ├── 1.obj
+├── control_mesh-lv.obj
+├── control_mesh-myo.obj
+└── control_mesh-rv.obj
 ```
 
 ## Preprocessing
@@ -54,15 +50,10 @@ Data preprocessing is a must so that images, segmentations, and template meshes 
 
 ## Training
 Detail structure of ModusGraph can be found in the paper.
-### Whole heart meshing (i.e., SCOT-HEART)
-The training process contains two stages:
-1. Pre-training: train the Voxel Processing Module, including CT modality handel and ResNet decoder.
-2. Training: train the R-StGCN module.
 
-### Dynamic meshing (i.e., CAP)
 The training process contains two stages:
-1. Pre-training: train the Voxel Processing Module and the R-StGCN module with CT data.
-2. Training: fine-tuning the whole ModusGraph networks with cine CMR data.
+1. Training: train the whole pipeline, including both ct and mr modality-handles.
+2. Fine-tune: fine tuning the R-StGCN module with mr data.
 
 Parameters of the network is customizable but not recommended.
 
@@ -72,38 +63,19 @@ We recommand using Weights and Bias for monitoring the training process. Followi
 ## Command line Running
 Running the whole training process is straightforward, just use commandline tool. See details of adjustable parameters in the script.
 
-    $ python main-whole_heart_meshing.py \
+    $ python train.py \
 
-    --image_dir /path/to/image \
-    --label_dir /path/to/label \
-    --log_dir /path/to/log_dir \
-    --out_dir /path/to/out_dir \
-
-    --max_epochs 500 \
-    --delay_epochs 250 \
-    --val_interval 50 \
-
-    --crop_window_size 128 128 128 \
-    --batch_size 24 \
-    --point_limit 53_500 \
-
-    --cache_rate 1.0
-
-Running the dynamic meshing process is very similar except arguments need for both CT and MR images and labels. See details in the script.
-
-    $ python main-dynamic_meshing.py \
-
-    --ct_image_dir /path/to/image_ct \
-    --ct_label_dir /path/to/label_ct \
-    --mr_image_dir /path/to/image_mr \
-    --mr_label_dir /path/to/label_mr \
-    --log_dir /path/to/log_dir \
-    --out_dir /path/to/out_dir \
+    --save_on cap                               # choose from 'cap' or 'sct' \
+    --template_dir  /your/path/to/template.obj  # choose from template folder according to the save_on \
+    --ct_data_dir   /your/path/to/ct_data       # path to your Dataset020_SCOTHEART_COMBINE \
+    --mr_data_dir   /your/path/to/mr_data       # path to your Dataset017_CAP_COMBINE \
+    --ckpt_dir      /your/path/to/checkpoint \
+    --out_dir       /your/path/to/output \
 
     --max_epochs 500 \
     --delay_epochs 250 \
     --val_interval 50 \
-    
+
     --crop_window_size 128 128 128 \
     --batch_size 24 \
     --point_limit 53_500 \

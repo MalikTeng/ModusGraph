@@ -47,7 +47,7 @@ from pytorch3d.structures import Meshes
 __all__ = [
     "ResNetDecoder", "ResBlock",
     "ConvLayer", 
-    "SubdivideMeshes"
+    # "SubdivideMeshes"
     ]
 
 
@@ -69,6 +69,10 @@ class ResNetDecoder(nn.Module):
         self.up_blocks, self.res_blocks = self._make_block_layers(num_layers_blocks)
 
         assert use_conv_final == True, 'use_conv_final must be True'
+        self.init_layer = ConvLayer(
+            out_channels, init_filters * 2 ** len(num_layers_blocks), 3, 1, 1,
+            norm, act
+        )
         self.final_layer = ConvLayer(
             init_filters, out_channels, 1, 1, 0,
             norm, 'sigmoid'
@@ -97,6 +101,7 @@ class ResNetDecoder(nn.Module):
 
     def forward(self, x):
         up_x = []
+        x = self.init_layer(x)
         for i, (up_block, res_block) in enumerate(zip(self.up_blocks, self.res_blocks)):
             x, _ = res_block(x)
             x = up_block(x)
@@ -220,7 +225,7 @@ class SubdivideMeshes(nn.Module):
     but different vertex positions.
     """
 
-    def __init__(self, meshes=None, faces_labels=None) -> None:
+    def __init__(self, meshes=None) -> None:
         """
         Args:
             meshes: Meshes object or None. If a meshes object is provided,
@@ -235,17 +240,13 @@ class SubdivideMeshes(nn.Module):
             # This computation is on indices, so gradients do not need to be
             # tracked.
             mesh = meshes[0]
-            assert faces_labels is not None, "faces_labels must be provided if meshes is provided"
-            faces_labels = list(
-                faces_index.nonzero().flatten() for faces_index in faces_labels.squeeze(0)
-                )
             with torch.no_grad():
-                subdivided_faces, self.faces_labels = self.subdivide_faces(mesh, faces_labels)
+                subdivided_faces = self.subdivide_faces(mesh)
                 if subdivided_faces.shape[1] != 3:
                     raise ValueError("faces can only have three vertices")
                 self.register_buffer("_subdivided_faces", subdivided_faces)
 
-    def subdivide_faces(self, meshes, faces_labels):
+    def subdivide_faces(self, mesh):
         r"""
         Args:
             meshes: a Meshes object.
@@ -301,56 +302,41 @@ class SubdivideMeshes(nn.Module):
            f3 = [5, 4, 3]
 
         """
-        meshes = meshes.submeshes([faces_labels])
-        subdivided_faces_packed = []
-        num_labels_submeshes = []
-        for mesh in meshes:
-            verts_packed = mesh.verts_packed()
-            with torch.no_grad():
-                faces_packed = mesh.faces_packed()
-                faces_packed_to_edges_packed = (
-                    mesh.faces_packed_to_edges_packed() + verts_packed.shape[0]
-                    )
+        verts_packed = mesh.verts_packed()
+        with torch.no_grad():
+            faces_packed = mesh.faces_packed()
+            faces_packed_to_edges_packed = (
+                mesh.faces_packed_to_edges_packed() + verts_packed.shape[0]
+                )
 
-                f0 = torch.stack(
-                    [
-                        faces_packed[:, 0],
-                        faces_packed_to_edges_packed[:, 2],
-                        faces_packed_to_edges_packed[:, 1],
-                    ],
-                    dim=1,
-                    )
-                f1 = torch.stack(
-                    [
-                        faces_packed[:, 1],
-                        faces_packed_to_edges_packed[:, 0],
-                        faces_packed_to_edges_packed[:, 2],
-                    ],
-                    dim=1,
-                    )
-                f2 = torch.stack(
-                    [
-                        faces_packed[:, 2],
-                        faces_packed_to_edges_packed[:, 1],
-                        faces_packed_to_edges_packed[:, 0],
-                    ],
-                    dim=1,
-                    )
-                f3 = faces_packed_to_edges_packed
-                subdivided_faces_packed.append(torch.cat(
-                    [f0, f1, f2, f3], dim=0
-                    ))  # (4*sum(F_n), 3)
-                num_labels_submeshes.append(f0.shape[0] + f1.shape[0] + f2.shape[0] + f3.shape[0])
+            f0 = torch.stack(
+                [
+                    faces_packed[:, 0],
+                    faces_packed_to_edges_packed[:, 2],
+                    faces_packed_to_edges_packed[:, 1],
+                ],
+                dim=1,
+                )
+            f1 = torch.stack(
+                [
+                    faces_packed[:, 1],
+                    faces_packed_to_edges_packed[:, 0],
+                    faces_packed_to_edges_packed[:, 2],
+                ],
+                dim=1,
+                )
+            f2 = torch.stack(
+                [
+                    faces_packed[:, 2],
+                    faces_packed_to_edges_packed[:, 1],
+                    faces_packed_to_edges_packed[:, 0],
+                ],
+                dim=1,
+                )
+            f3 = faces_packed_to_edges_packed
+            new_faces_packed = torch.cat([f0, f1, f2, f3], dim=0)
                 
-        subdivided_faces_packed = torch.concat(subdivided_faces_packed, dim=0)
-
-        num_labels_submeshes = torch.as_tensor(num_labels_submeshes)
-        cum_num_labels_submeshes = num_labels_submeshes.cumsum(0)
-        subdivided_faces_labels = torch.zeros((1, len(num_labels_submeshes), cum_num_labels_submeshes[-1]), dtype=torch.long)
-        for i, (cum_num_labels, num_labels) in enumerate(zip(cum_num_labels_submeshes, num_labels_submeshes)):
-            subdivided_faces_labels[0, i, cum_num_labels - num_labels:cum_num_labels] = torch.arange(cum_num_labels-num_labels, cum_num_labels)
-
-        return subdivided_faces_packed, subdivided_faces_labels
+        return new_faces_packed
 
     def forward(self, meshes, feats=None):
         """
@@ -405,28 +391,13 @@ class SubdivideMeshes(nn.Module):
         edges = meshes[0].edges_packed()
 
         # The set of faces is the same across the different meshes.
-        new_faces = self._subdivided_faces.view(1, -1, 3).expand(self._N, -1, -1)
-        new_faces_labels = self.faces_labels.expand(self._N, -1, -1)
+        new_faces = self._subdivided_faces.expand(self._N, -1, -1)
 
         # Add one new vertex at the midpoint of each edge by taking the average
         # of the vertices that form each edge.
         new_verts = verts[:, edges].mean(dim=2)
         new_verts = torch.cat([verts, new_verts], dim=1)  # (sum(V_n)+sum(E_n), 3)
-        new_feats = None
-
-        # Calculate features for new vertices.
-        if feats is not None:
-            if feats.dim() == 2:
-                # feats is in packed format, transform it from packed to
-                # padded, i.e. (N*V, D) to (N, V, D).
-                feats = feats.view(verts.size(0), verts.size(1), feats.size(1))
-            if feats.dim() != 3:
-                raise ValueError("features need to be of shape (N, V, D) or (N*V, D)")
-
-            # Take average of the features at the vertices that form each edge.
-            new_feats = feats[:, edges].mean(dim=2)
-            new_feats = torch.cat([feats, new_feats], dim=1)  # (sum(V_n)+sum(E_n), 3)
 
         new_meshes = Meshes(verts=new_verts, faces=new_faces)
 
-        return new_meshes, new_faces_labels, new_feats
+        return new_meshes
